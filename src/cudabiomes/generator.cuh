@@ -31,8 +31,6 @@ STRUCT(Generator) {
 			//SurfaceNoiseBeta snb;
 		};
 	};
-	NetherNoise nn; // MC 1.16
-	EndNoise en; // MC 1.9
 };
 
 
@@ -52,15 +50,15 @@ extern "C"
  * The function allocCache() can be used to allocate the corresponding int
  * buffer using malloc().
  */
-__host__ __device__ size_t getMinCacheSize(const Generator *g, int scale, int sx, int sy, int sz);
-__host__ __device__ int *allocCache(const Generator *g, Range r);
+__host__ __device__ size_t getMinCacheSize(const Generator &g, int scale, int sx, int sy, int sz);
+__host__ __device__ int *allocCache(const Generator &g, Range r);
 
 /**
  * Gets the biome for a specified scaled position. Note that the scale should
  * be either 1 or 4, for block or biome coordinates respectively.
  * Returns none (-1) upon failure.
  */
-__host__ __device__ int getBiomeAt(const Generator *g, int scale, int x, int y, int z);
+__host__ __device__ int getBiomeAt(const Generator &g, int scale, int x, int y, int z);
 
 /**
  * Returns the default layer that corresponds to the given scale.
@@ -92,15 +90,6 @@ __host__ __device__ Layer *setupLayer(Layer *l, mapfunc_t *map, int mc, int8_t z
  * buffer size.
  */
 __host__ __device__ int genArea(const Layer *layer, int *out, int areaX, int areaZ, int areaWidth, int areaHeight);
-
-/**
- * Map an approximation of the Overworld surface height.
- * The horizontal scaling is 1:4. If non-null, the ids are filled with the
- * biomes of the area. The height (written to y) is in blocks.
- */
-__host__ __device__ int mapApproxHeight(float *y, int *ids, const Generator *g, const SurfaceNoise *sn, int x, int z, int w, int h);
-
-
 
 __host__ __device__ int mapOceanMixMod(const Layer * l, int * out, int x, int z, int w, int h) {
 	int *otyp;
@@ -159,75 +148,64 @@ __host__ __device__ int mapOceanMixMod(const Layer * l, int * out, int x, int z,
  * control LARGE_BIOMES or to FORCE_OCEAN_VARIANTS to enable ocean variants at
  * scales higher than normal.
  */
-__host__ __device__ void setupGenerator(Generator *g, int mc, uint32_t flags) {
-	g->mc = mc;
-	g->dim = DIM_UNDEF;
-	g->flags = flags;
-	g->seed = 0;
-	g->sha = 0;
+__host__ __device__ void setupGenerator(Generator &g, int mc, uint32_t flags) {
+	g.mc = mc;
+	g.dim = DIM_UNDEF;
+	g.flags = flags;
+	g.seed = 0;
+	g.sha = 0;
 
 	if (MC_B1_8 <= mc && mc <= MC_1_17) {
-		setupLayerStack(&g->ls, mc, flags & LARGE_BIOMES);
-		g->entry = NULL;
+		setupLayerStack(&g.ls, mc, flags & LARGE_BIOMES);
+		g.entry = NULL;
 		if (flags & FORCE_OCEAN_VARIANTS && mc >= MC_1_13) {
-			g->ls.entry_16 = setupLayer(
-				g->xlayer+2, &mapOceanMixMod, mc, 1, 0, 0,
-				g->ls.entry_16, &g->ls.layers[L_ZOOM_16_OCEAN]);
+			g.ls.entry_16 = setupLayer(
+				g.xlayer+2, &mapOceanMixMod, mc, 1, 0, 0,
+				g.ls.entry_16, &g.ls.layers[L_ZOOM_16_OCEAN]);
 
-			g->ls.entry_64 = setupLayer(
-				g->xlayer+3, &mapOceanMixMod, mc, 1, 0, 0,
-				g->ls.entry_64, &g->ls.layers[L_ZOOM_64_OCEAN]);
+			g.ls.entry_64 = setupLayer(
+				g.xlayer+3, &mapOceanMixMod, mc, 1, 0, 0,
+				g.ls.entry_64, &g.ls.layers[L_ZOOM_64_OCEAN]);
 
-			g->ls.entry_256 = setupLayer(
-				g->xlayer+4, &mapOceanMixMod, mc, 1, 0, 0,
-				g->ls.entry_256, &g->ls.layers[L_OCEAN_TEMP_256]);
+			g.ls.entry_256 = setupLayer(
+				g.xlayer+4, &mapOceanMixMod, mc, 1, 0, 0,
+				g.ls.entry_256, &g.ls.layers[L_OCEAN_TEMP_256]);
 		}
 	}
-	else if (MC_1_18 <= mc) initBiomeNoise(&g->bn, mc);
-	else g->bnb.mc = mc;
+	else if (MC_1_18 <= mc) initBiomeNoise(&g.bn, mc);
+	else g.bnb.mc = mc;
 }
 
+__host__ __device__ void applySeed(Generator &g, uint64_t seed) {
+	g.dim = DIM_OVERWORLD;
+	g.seed = seed;
+	g.sha = 0;
 
-/**
- * Initializes the generator for a given dimension and seed.
- * dim=0:   Overworld
- * dim=-1:  Nether
- * dim=+1:  End
- */
-__host__ __device__ void applySeed(Generator *g, int dim, uint64_t seed) {
-	g->dim = dim;
-	g->seed = seed;
-	g->sha = 0;
-
-	if (dim == DIM_OVERWORLD) {
-		if (g->mc <= MC_B1_7) {
-			setBetaBiomeSeed(&g->bnb, seed);
-			//initSurfaceNoiseBeta(&g->snb, g->seed);
-		}
-		else if (g->mc <= MC_1_17) setLayerSeed(g->entry ? g->entry : g->ls.entry_1, seed);
-		else /* if (g->mc >= MC_1_18) */ setBiomeSeed(&g->bn, seed, g->flags & LARGE_BIOMES);
+	if (g.mc <= MC_B1_7) {
+		setBetaBiomeSeed(&g.bnb, seed);
+		//initSurfaceNoiseBeta(&g->snb, g->seed);
 	}
-	else if (dim == DIM_NETHER && MC_1_16_1 <= g->mc) setNetherSeed(&g->nn, seed);
-	else if (dim == DIM_END && MC_1_9 <= g->mc) setEndSeed(&g->en, g->mc, seed);
-	if (MC_1_15 <= g->mc) {
-		if (g->mc <= MC_1_17 && dim == DIM_OVERWORLD && !g->entry) g->sha = g->ls.entry_1->startSalt;
-		else g->sha = getVoronoiSHA(seed);
+	else if (g.mc <= MC_1_17) setLayerSeed(g.entry ? g.entry : g.ls.entry_1, seed);
+	else /* if (g.mc >= MC_1_18) */ setBiomeSeed(&g.bn, seed, g.flags);
+	if (MC_1_15 <= g.mc) {
+		if (g.mc <= MC_1_17 && !g.entry) g.sha = g.ls.entry_1->startSalt;
+		else g.sha = getVoronoiSHA(seed);
 	}
 }
 
 
-__host__ __device__ size_t getMinCacheSize(const Generator *g, int scale, int sx, int sy, int sz) {
+__host__ __device__ size_t getMinCacheSize(const Generator &g, int scale, int sx, int sy, int sz) {
 	if (sy == 0) sy = 1;
 	size_t len = (size_t)sx * sz * sy;
-	if (g->mc <= MC_B1_7 && scale <= 4 && !(g->flags & NO_BETA_OCEAN)) {
+	if (g.mc <= MC_B1_7 && scale <= 4 && !(g.flags & NO_BETA_OCEAN)) {
 		int cellwidth = scale >> 1;
 		int smin = (sx < sz ? sx : sz);
 		int slen = ((smin >> (2 >> cellwidth)) + 1) * 2 + 1;
 		len += slen * sizeof(SeaLevelColumnNoiseBeta);
 	}
-	else if (MC_B1_8 <= g->mc && g->mc <= MC_1_17 && g->dim == DIM_OVERWORLD) {
+	else if (MC_B1_8 <= g.mc && g.mc <= MC_1_17 && g.dim == DIM_OVERWORLD) {
 		// recursively check the layer stack for the max buffer
-		const Layer *entry = getLayerForScale(g, scale);
+		const Layer *entry = getLayerForScale(&g, scale);
 		if (!entry) {
 			printf("getMinCacheSize(): failed to determine scaled entry\n");
 			// exit(1);
@@ -236,7 +214,7 @@ __host__ __device__ size_t getMinCacheSize(const Generator *g, int scale, int sx
 		size_t len2d = getMinLayerCacheSize(entry, sx, sz);
 		len += len2d - sx*sz;
 	}
-	else if ((g->mc >= MC_1_18 || g->dim != DIM_OVERWORLD) && scale <= 1) {
+	else if ((g.mc >= MC_1_18 || g.dim != DIM_OVERWORLD) && scale <= 1) {
 		// allocate space for temporary copy of voronoi source
 		sx = ((sx+3) >> 2) + 2;
 		sy = ((sy+3) >> 2) + 2;
@@ -260,7 +238,7 @@ __host__ __device__ size_t getMinCacheSize(const Generator *g, int scale, int sx
 //     return 0;
 // }
 
-__host__ __device__ int *allocCache(const Generator *g, Range r) {
+__host__ __device__ int *allocCache(const Generator &g, Range r) {
 	size_t len = getMinCacheSize(g, r.scale, r.sx, r.sy, r.sz);
 	// return (int*) calloc(len, sizeof(int));
 	int *__temp;
@@ -282,49 +260,41 @@ __host__ __device__ int *allocCache(const Generator *g, Range r) {
  *
  * The return value is zero upon success.
  */
-__host__ __device__ int genBiomes(const Generator *g, int *cache, Range r) {
+__host__ __device__ int genBiomes(const Generator &g, int *cache, Range r) {
 	int err = 1;
 	int64_t i, k;
 
-	if (g->dim == DIM_OVERWORLD) {
-		if (MC_B1_8 <= g->mc && g->mc <= MC_1_17) {
-			const Layer *entry = getLayerForScale(g, r.scale);
-			if (!entry) return -1;
-			err = genArea(entry, cache, r.x, r.z, r.sx, r.sz);
-			if (err) return err;
-			for (k = 1; k < r.sy; k++) { // overworld has no vertical noise: expanding 2D into 3D
-				for (i = 0; i < r.sx*r.sz; i++) cache[k*r.sx*r.sz + i] = cache[i];
-			}
-			return 0;
-		} else if (MC_1_18 <= g->mc) return genBiomeNoiseScaled(&g->bn, cache, r, g->sha);
-		else { // g->mc <= MC_B1_7
-			if (g->flags & NO_BETA_OCEAN) err = genBiomeNoiseBetaScaled(&g->bnb, NULL, cache, r);
-			else {
-				SurfaceNoiseBeta snb;
-				initSurfaceNoiseBeta(&snb, g->seed);
-				err = genBiomeNoiseBetaScaled(&g->bnb, &snb, cache, r);
-			}
-			if (err) return err;
-			for (k = 1; k < r.sy; k++) { // overworld has no vertical noise: expanding 2D into 3D
-				for (i = 0; i < r.sx*r.sz; i++) cache[k*r.sx*r.sz + i] = cache[i];
-			}
-			return 0;
+	if (MC_B1_8 <= g.mc && g.mc <= MC_1_17) {
+		const Layer *entry = getLayerForScale(&g, r.scale);
+		if (!entry) return -1;
+		err = genArea(entry, cache, r.x, r.z, r.sx, r.sz);
+		if (err) return err;
+		for (k = 1; k < r.sy; k++) { // overworld has no vertical noise: expanding 2D into 3D
+			for (i = 0; i < r.sx*r.sz; i++) cache[k*r.sx*r.sz + i] = cache[i];
 		}
+		return 0;
+	} else if (MC_1_18 <= g.mc) return genBiomeNoiseScaled(&g.bn, cache, r, g.sha);
+	else { // g->mc <= MC_B1_7
+		if (g.flags & NO_BETA_OCEAN) err = genBiomeNoiseBetaScaled(&g.bnb, NULL, cache, r);
+		else {
+			SurfaceNoiseBeta snb;
+			initSurfaceNoiseBeta(&snb, g.seed);
+			err = genBiomeNoiseBetaScaled(&g.bnb, &snb, cache, r);
+		}
+		if (err) return err;
+		for (k = 1; k < r.sy; k++) { // overworld has no vertical noise: expanding 2D into 3D
+			for (i = 0; i < r.sx*r.sz; i++) cache[k*r.sx*r.sz + i] = cache[i];
+		}
+		return 0;
 	}
-	else if (g->dim == DIM_NETHER) return genNetherScaled(&g->nn, cache, r, g->mc, g->sha);
-	else if (g->dim == DIM_END) return genEndScaled(&g->en, cache, r, g->mc, g->sha);
 
 	return err;
 }
 
-__host__ __device__ int getBiomeAt(const Generator *g, int scale, int x, int y, int z) {
+__host__ __device__ int getBiomeAt(const Generator &g, int scale, int x, int y, int z) {
 	Range r = {scale, x, z, 1, 1, y, 1};
 	int *ids = allocCache(g, r);
-	int id = genBiomes(g, ids, r);
-	if (id == 0)
-		id = ids[0];
-	else
-		id = none;
+	int id = genBiomes(g, ids, r) ? none : ids[0];
 	free(ids);
 	return id;
 }
@@ -655,158 +625,6 @@ __host__ __device__ int genArea(const Layer *layer, int *out, int areaX, int are
 	memset(out, 0, sizeof(*out)*areaWidth*areaHeight);
 	return layer->getMap(layer, out, areaX, areaZ, areaWidth, areaHeight);
 }
-
-
-__host__ __device__ int mapApproxHeight(float *y, int *ids, const Generator *g, const SurfaceNoise *sn, int x, int z, int w, int h) {
-	if (g->dim != DIM_OVERWORLD)
-		return 1;
-
-	if (g->mc >= MC_1_18)
-	{
-		if (g->bn.nptype != -1 && g->bn.nptype != NP_DEPTH)
-			return 1;
-		int64_t i, j;
-		for (j = 0; j < h; j++)
-		{
-			for (i = 0; i < w; i++)
-			{
-				int flags = 0;//SAMPLE_NO_SHIFT;
-				int64_t np[6];
-				int id = sampleBiomeNoise(&g->bn, np, x+i, 0, z+j, 0, flags);
-				if (ids)
-					ids[j*w+i] = id;
-				y[j*w+i] = np[NP_DEPTH] / 76.0;
-			}
-		}
-		return 0;
-	}
-	else if (g->mc <= MC_B1_7)
-	{
-		SurfaceNoiseBeta snb; // TODO: merge SurfaceNoise and SurfaceNoiseBeta?
-		initSurfaceNoiseBeta(&snb, g->seed);
-		int64_t i, j;
-		for (j = 0; j < h; j++)
-		{
-			for (i = 0; i < w; i++)
-			{
-				int samplex = (x + i) * 4 + 2;
-				int samplez = (z + j) * 4 + 2;
-				// TODO: properly implement beta surface finder
-				y[j*w+i] = approxSurfaceBeta(&g->bnb, &snb, samplex, samplez);
-			}
-		}
-		return 0;
-	}
-
-	const float biome_kernel[25] = { // with 10 / (sqrt(i**2 + j**2) + 0.2)
-		3.302044127, 4.104975761, 4.545454545, 4.104975761, 3.302044127,
-		4.104975761, 6.194967155, 8.333333333, 6.194967155, 4.104975761,
-		4.545454545, 8.333333333, 50.00000000, 8.333333333, 4.545454545,
-		4.104975761, 6.194967155, 8.333333333, 6.194967155, 4.104975761,
-		3.302044127, 4.104975761, 4.545454545, 4.104975761, 3.302044127,
-	};
-
-	double *depth = (double*) malloc(sizeof(double) * 2 * w * h);
-	double *scale = depth + w * h;
-	int64_t i, j;
-	int ii, jj;
-
-	Range r = {4, x-2, z-2, w+5, h+5, 0, 1};
-	int *cache = allocCache(g, r);
-	genBiomes(g, cache, r);
-
-	for (j = 0; j < h; j++)
-	{
-		for (i = 0; i < w; i++)
-		{
-			double d0, s0;
-			double wt = 0, ws = 0, wd = 0;
-			int id0 = cache[(j+2)*r.sx + (i+2)];
-			getBiomeDepthAndScale(id0, &d0, &s0, 0);
-
-			for (jj = 0; jj < 5; jj++)
-			{
-				for (ii = 0; ii < 5; ii++)
-				{
-					double d, s;
-					int id = cache[(j+jj)*r.sx + (i+ii)];
-					getBiomeDepthAndScale(id, &d, &s, 0);
-					float weight = biome_kernel[jj*5+ii] / (d + 2);
-					if (d > d0)
-						weight *= 0.5;
-					ws += s * weight;
-					wd += d * weight;
-					wt += weight;
-				}
-			}
-			ws /= wt;
-			wd /= wt;
-			ws = ws * 0.9 + 0.1;
-			wd = (wd * 4.0 - 1) / 8;
-			ws = 96 / ws;
-			wd = wd * 17./64;
-			depth[j*w+i] = wd;
-			scale[j*w+i] = ws;
-			if (ids)
-				ids[j*w+i] = id0;
-		}
-	}
-	free(cache);
-
-	for (j = 0; j < h; j++)
-	{
-		for (i = 0; i < w; i++)
-		{
-			int px = x+i, pz = z+j;
-			double off = sampleOctaveAmp(&sn->octdepth, px*200, 10, pz*200, 1, 0, 1);
-			off *= 65535./8000;
-			if (off < 0) off = -0.3 * off;
-			off = off * 3 - 2;
-			if (off > 1) off = 1;
-			off *= 17./64;
-			if (off < 0) off *= 1./28;
-			else off *= 1./40;
-
-			double vmin = 0, vmax = 0;
-			int ytest = 8, ymin = 0, ymax = 32;
-			do
-			{
-				double v[2];
-				int k;
-				for (k = 0; k < 2; k++)
-				{
-					int py = ytest + k;
-					double n0 = sampleSurfaceNoise(sn, px, py, pz);
-					double fall = 1 - 2 * py / 32.0 + off - 0.46875;
-					fall = scale[j*w+i] * (fall + depth[j*w+i]);
-					n0 += (fall > 0 ? 4*fall : fall);
-					v[k] = n0;
-					if (n0 >= 0 && py > ymin)
-					{
-						ymin = py;
-						vmin = n0;
-					}
-					if (n0 < 0 && py < ymax)
-					{
-						ymax = py;
-						vmax = n0;
-					}
-				}
-				double dy = v[0] / (v[0] - v[1]);
-				dy = (dy <= 0 ? floor(dy) : ceil(dy)); // round away from zero
-				ytest += (int) dy;
-				if (ytest <= ymin) ytest = ymin+1;
-				if (ytest >= ymax) ytest = ymax-1;
-			}
-			while (ymax - ymin > 1);
-
-			y[j*w+i] = 8 * (vmin / (double)(vmin - vmax) + ymin);
-		}
-	}
-	free(depth);
-	return 0;
-}
-
 
 #ifdef __cplusplus
 }

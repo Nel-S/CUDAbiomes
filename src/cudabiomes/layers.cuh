@@ -7,7 +7,7 @@
 #include <cstring>
 
 
-#define LAYER_INIT_SHA          (~0ULL)
+#define LAYER_INIT_SHA (~0ULL)
 
 
 enum BiomeTempCategory
@@ -133,9 +133,6 @@ extern "C"
 // BiomeID Helpers
 //==============================================================================
 
-__host__ __device__ int biomeExists(int mc, int id);
-__host__ __device__ int isOverworld(int mc, int id);
-__host__ __device__ int getDimension(int id);
 __host__ __device__ int getMutated(int mc, int id);
 __host__ __device__ int getCategory(int mc, int id);
 __host__ __device__ int areSimilar(int mc, int id1, int id2);
@@ -144,7 +141,6 @@ __host__ __device__ int isShallowOcean(int id);
 __host__ __device__ int isDeepOcean(int id);
 __host__ __device__ int isOceanic(int id);
 __host__ __device__ int isSnowy(int id);
-__host__ __device__ int getBiomeDepthAndScale(int id, double *depth, double *scale, int *grass);
 
 //==============================================================================
 // Essentials
@@ -205,224 +201,9 @@ __host__ __device__ void mapVoronoiPlane(uint64_t sha, int *out, int *src,
 
 
 
-
-
-
 //==============================================================================
 // Essentials
 //==============================================================================
-
-__host__ __device__ int biomeExists(int mc, int id)
-{
-	if (mc >= MC_1_18)
-	{
-		if (id >= soul_sand_valley && id <= basalt_deltas)
-			return 1;
-		if (id >= small_end_islands && id <= end_barrens)
-			return 1;
-
-		if (id == cherry_grove)
-			return mc >= MC_1_20;
-
-		if (id == deep_dark || id == mangrove_swamp)
-			return mc >= MC_1_19_2;
-
-		switch (id)
-		{
-		case ocean:
-		case plains:
-		case desert:
-		case mountains:                 // windswept_hills
-		case forest:
-		case taiga:
-		case swamp:
-		case river:
-		case nether_wastes:
-		case the_end:
-		case frozen_ocean:
-		case frozen_river:
-		case snowy_tundra:              // snowy_plains
-		case mushroom_fields:
-		case beach:
-		case jungle:
-		case jungle_edge:               // sparse_jungle
-		case deep_ocean:
-		case stone_shore:               // stony_shore
-		case snowy_beach:
-		case birch_forest:
-		case dark_forest:
-		case snowy_taiga:
-		case giant_tree_taiga:          // old_growth_pine_taiga
-		case wooded_mountains:          // windswept_forest
-		case savanna:
-		case savanna_plateau:
-		case badlands:
-		case wooded_badlands_plateau:   // wooded_badlands
-		case warm_ocean:
-		case lukewarm_ocean:
-		case cold_ocean:
-		case deep_warm_ocean:
-		case deep_lukewarm_ocean:
-		case deep_cold_ocean:
-		case deep_frozen_ocean:
-		case sunflower_plains:
-		case gravelly_mountains:        // windswept_gravelly_hills
-		case flower_forest:
-		case ice_spikes:
-		case tall_birch_forest:         // old_growth_birch_forest
-		case giant_spruce_taiga:        // old_growth_spruce_taiga
-		case shattered_savanna:         // windswept_savanna
-		case eroded_badlands:
-		case bamboo_jungle:
-		case dripstone_caves:
-		case lush_caves:
-		case meadow:
-		case grove:
-		case snowy_slopes:
-		case stony_peaks:
-		case jagged_peaks:
-		case frozen_peaks:
-			return 1;
-		default:
-			return 0;
-		}
-	}
-
-	if (mc <= MC_B1_7)
-	{
-		switch(id)
-		{
-		case plains:
-		case desert:
-		case forest:
-		case taiga:
-		case swamp:
-		case snowy_tundra:
-		case savanna:
-		case seasonal_forest:
-		case rainforest:
-		case shrubland:
-		// we treat areas below the sea level as oceans
-		case ocean:
-		case frozen_ocean:
-			return 1;
-		default:
-			return 0;
-		}
-	}
-
-	if (mc <= MC_B1_8)
-	{
-		switch (id)
-		{
-		case frozen_ocean:
-		case frozen_river:
-		case snowy_tundra:
-		case mushroom_fields:
-		case mushroom_field_shore:
-		case the_end:
-			return 0;
-		}
-	}
-	if (mc <= MC_1_0)
-	{
-		switch (id)
-		{
-		case snowy_mountains:
-		case beach:
-		case desert_hills:
-		case wooded_hills:
-		case taiga_hills:
-		case mountain_edge:
-			return 0;
-		}
-	}
-
-	if (id >= ocean             && id <= mountain_edge)     return 1;
-	if (id >= jungle            && id <= jungle_hills)      return mc >= MC_1_2;
-	if (id >= jungle_edge       && id <= badlands_plateau)  return mc >= MC_1_7;
-	if (id >= small_end_islands && id <= end_barrens)       return mc >= MC_1_9;
-	if (id >= warm_ocean        && id <= deep_frozen_ocean) return mc >= MC_1_13;
-
-	switch (id)
-	{
-	case the_void:
-		return mc >= MC_1_9;
-	case sunflower_plains:
-	case desert_lakes:
-	case gravelly_mountains:
-	case flower_forest:
-	case taiga_mountains:
-	case swamp_hills:
-	case ice_spikes:
-	case modified_jungle:
-	case modified_jungle_edge:
-	case tall_birch_forest:
-	case tall_birch_hills:
-	case dark_forest_hills:
-	case snowy_taiga_mountains:
-	case giant_spruce_taiga:
-	case giant_spruce_taiga_hills:
-	case modified_gravelly_mountains:
-	case shattered_savanna:
-	case shattered_savanna_plateau:
-	case eroded_badlands:
-	case modified_wooded_badlands_plateau:
-	case modified_badlands_plateau:
-		return mc >= MC_1_7;
-	case bamboo_jungle:
-	case bamboo_jungle_hills:
-		return mc >= MC_1_14;
-	case soul_sand_valley:
-	case crimson_forest:
-	case warped_forest:
-	case basalt_deltas:
-		return mc >= MC_1_16_1;
-	case dripstone_caves:
-	case lush_caves:
-		return mc >= MC_1_17;
-	default:
-		return 0;
-	}
-}
-
-__host__ __device__ int isOverworld(int mc, int id)
-{
-	if (!biomeExists(mc, id))
-		return 0;
-
-	if (id >= small_end_islands && id <= end_barrens) return 0;
-	if (id >= soul_sand_valley && id <= basalt_deltas) return 0;
-
-	switch (id)
-	{
-	case nether_wastes:
-	case the_end:
-		return 0;
-	case frozen_ocean:
-		return mc <= MC_1_6 || mc >= MC_1_13;
-	case mountain_edge:
-		return mc <= MC_1_6;
-	case deep_warm_ocean:
-	case the_void:
-		return 0;
-	case tall_birch_forest:
-		return mc <= MC_1_8 || mc >= MC_1_11;
-	case dripstone_caves:
-	case lush_caves:
-		return mc >= MC_1_18;
-	}
-	return 1;
-}
-
-__host__ __device__ int getDimension(int id)
-{
-	if (id >= small_end_islands && id <= end_barrens) return DIM_END;
-	if (id >= soul_sand_valley && id <= basalt_deltas) return DIM_NETHER;
-	if (id == the_end) return DIM_END;
-	if (id == nether_wastes) return DIM_NETHER;
-	return DIM_OVERWORLD;
-}
 
 __host__ __device__ int getMutated(int mc, int id)
 {
@@ -2795,7 +2576,7 @@ __host__ __device__ uint64_t getVoronoiSHA(uint64_t seed)
 	return BSWAP32(a0) | ((uint64_t)BSWAP32(a1) << 32);
 }
 
-void voronoiAccess3D(uint64_t sha, int x, int y, int z, int *x4, int *y4, int *z4)
+__host__ __device__ void voronoiAccess3D(uint64_t sha, int x, int y, int z, int *x4, int *y4, int *z4)
 {
 	x -= 2;
 	y -= 2;

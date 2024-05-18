@@ -2,8 +2,7 @@
 #define BIOMES_H_
 
 /* Minecraft versions */
-enum MCVersion
-{   // MC_1_X refers to the latest patch of the respective 1.X release.
+enum MCVersion {   // MC_1_X refers to the latest patch of the respective 1.X release.
 	// NOTE: Development effort focuses on just the newest patch for each major
 	// release. Minor releases and major versions <= 1.0 are experimental.
 	MC_UNDEF,
@@ -35,16 +34,12 @@ enum MCVersion
 	MC_NEWEST = MC_1_20,
 };
 
-enum Dimension
-{
-	DIM_NETHER      =   -1,
+enum Dimension {
 	DIM_OVERWORLD   =    0,
-	DIM_END         =   +1,
 	DIM_UNDEF       = 1000,
 };
 
-enum BiomeID
-{
+enum BiomeID {
 	none = -1,
 	// 0
 	ocean = 0,

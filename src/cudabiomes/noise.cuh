@@ -34,23 +34,11 @@ extern "C"
 {
 #endif
 
-/// Helper
-static inline ATTR(hot, const)
-__host__ __device__ double maintainPrecision(double x)
-{   // This is a highly performance critical function that is used to correct
-	// progressing errors from float-maths. However, since cubiomes uses
-	// doubles anyway, this seems useless in practice.
-
-	//return x - round(x / 33554432.0) * 33554432.0;
-	return x;
-}
-
 /// Perlin noise
 __host__ __device__ void perlinInit(PerlinNoise *noise, uint64_t *seed);
 __host__ __device__ void xPerlinInit(PerlinNoise *noise, Xoroshiro *xr);
 
-__host__ __device__ double samplePerlin(const PerlinNoise *noise, double x, double y, double z,
-		double yamp, double ymin);
+__host__ __device__ double samplePerlin(const PerlinNoise *noise, double x, double y, double z, double yamp, double ymin);
 __host__ __device__ double sampleSimplex2D(const PerlinNoise *noise, double x, double y);
 
 /// Perlin Octaves
@@ -64,7 +52,6 @@ __host__ __device__ int xOctaveInit(OctaveNoise *noise, Xoroshiro *xr, PerlinNoi
 __host__ __device__ double sampleOctave(const OctaveNoise *noise, double x, double y, double z);
 __host__ __device__ double sampleOctaveAmp(const OctaveNoise *noise, double x, double y, double z,
 		double yamp, double ymin, int ydefault);
-__host__ __device__ double sampleOctave2D(const OctaveNoise *noise, double x, double z);
 __host__ __device__ double sampleOctaveBeta17Biome(const OctaveNoise *noise, double x, double z);
 __host__ __device__ void sampleOctaveBeta17Terrain(const OctaveNoise *noise, double *v,
 		double x, double z, int yLacFlag, double lacmin);
@@ -374,7 +361,7 @@ __host__ __device__ static double simplexGrad(int idx, double x, double y, doubl
 	return con * con * indexedLerp(idx, x, y, z);
 }
 
-double sampleSimplex2D(const PerlinNoise *noise, double x, double y)
+__host__ __device__ double sampleSimplex2D(const PerlinNoise *noise, double x, double y)
 {
 	const double SKEW = 0.5 * (sqrtf(3) - 1.0);
 	const double UNSKEW = (3.0 - sqrtf(3)) / 6.0;
@@ -529,9 +516,9 @@ __host__ __device__ double sampleOctaveAmp(const OctaveNoise *noise, double x, d
 	{
 		PerlinNoise *p = noise->octaves + i;
 		double lf = p->lacunarity;
-		double ax = maintainPrecision(x * lf);
-		double ay = ydefault ? -p->b : maintainPrecision(y * lf);
-		double az = maintainPrecision(z * lf);
+		double ax = x * lf;
+		double ay = ydefault ? -p->b : y * lf;
+		double az = z * lf;
 		double pv = samplePerlin(p, ax, ay, az, yamp * lf, ymin * lf);
 		v += p->amplitude * pv;
 	}
@@ -546,9 +533,9 @@ __host__ __device__ double sampleOctave(const OctaveNoise *noise, double x, doub
 	{
 		PerlinNoise *p = noise->octaves + i;
 		double lf = p->lacunarity;
-		double ax = maintainPrecision(x * lf);
-		double ay = maintainPrecision(y * lf);
-		double az = maintainPrecision(z * lf);
+		double ax = x * lf;
+		double ay = y * lf;
+		double az = z * lf;
 		double pv = samplePerlin(p, ax, ay, az, 0, 0);
 		v += p->amplitude * pv;
 	}
@@ -563,8 +550,8 @@ __host__ __device__ double sampleOctaveBeta17Biome(const OctaveNoise *noise, dou
 	{
 		PerlinNoise *p = noise->octaves + i;
 		double lf = p->lacunarity;
-		double ax = maintainPrecision(x * lf) + p->a;
-		double az = maintainPrecision(z * lf) + p->b;
+		double ax = x * lf + p->a;
+		double az = z * lf + p->b;
 		double pv = sampleSimplex2D(p, ax, az);
 		v += p->amplitude * pv;
 	}
@@ -583,8 +570,8 @@ __host__ __device__ void sampleOctaveBeta17Terrain(const OctaveNoise *noise, dou
 		double lf = p->lacunarity;
 		if (lacmin && lf > lacmin)
 			continue;
-		double ax = maintainPrecision(x * lf);
-		double az = maintainPrecision(z * lf);
+		double ax = x * lf;
+		double az = z * lf;
 		samplePerlinBeta17Terrain(p, v, ax, az, yLacFlag ? 0.5 : 1.0);
 	}
 }

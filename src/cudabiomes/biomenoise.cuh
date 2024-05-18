@@ -44,35 +44,6 @@ STRUCT(Range)
 	int y, sy;
 };
 
-
-// Nether biome generator 1.16+
-STRUCT(NetherNoise)
-{   // altitude and wierdness don't affect nether biomes
-	// and the weight is a 5th noise parameter which is constant
-	DoublePerlinNoise temperature;
-	DoublePerlinNoise humidity;
-	PerlinNoise oct[8]; // buffer for octaves in double perlin noise
-};
-
-// End biome generator 1.9+
-STRUCT(EndNoise)
-{
-	PerlinNoise perlin;
-	int mc;
-};
-
-STRUCT(SurfaceNoise)
-{
-	double xzScale, yScale;
-	double xzFactor, yFactor;
-	OctaveNoise octmin;
-	OctaveNoise octmax;
-	OctaveNoise octmain;
-	OctaveNoise octsurf;
-	OctaveNoise octdepth;
-	PerlinNoise oct[16+16+8+4+16];
-};
-
 STRUCT(SurfaceNoiseBeta)
 {
 	OctaveNoise octmin;
@@ -162,64 +133,11 @@ extern "C"
 // Noise
 //==============================================================================
 
-__host__ __device__ void initSurfaceNoise(SurfaceNoise *sn, int dim, uint64_t seed);
 __host__ __device__ void initSurfaceNoiseBeta(SurfaceNoiseBeta *snb, uint64_t seed);
-__host__ __device__ double sampleSurfaceNoise(const SurfaceNoise *sn, int x, int y, int z);
-
 
 //==============================================================================
 // End (1.9+), Nether (1.16+) and Overworld (1.18+) Biome Noise Generation
 //==============================================================================
-
-/**
- * Nether biomes are 3D, and generated at scale 1:4. Use voronoiAccess3D() to
- * convert coordinates at 1:1 scale to their 1:4 access. Biome checks for
- * structures are generally done at y=0.
- *
- * The function getNetherBiome() determines the nether biome at a given
- * coordinate at scale 1:4. The parameter 'ndel' is an output noise delta for
- * optimization purposes and can be ignored (nullable).
- *
- * Use mapNether2D() to get a 2D area of nether biomes at y=0, scale 1:4.
- *
- * The mapNether3D() function attempts to optimize the generation of a volume
- * at scale 1:4. The output is indexed as:
- * out[i_y*(r.sx*r.sz) + i_z*r.sx + i_x].
- * If the optimization parameter 'confidence' has a value less than 1.0, the
- * generation will generally be faster, but can yield incorrect results in some
- * circumstances.
- *
- * The output buffer for the map-functions need only be of sufficient size to
- * hold the generated area (i.e. w*h or r.sx*r.sy*r.sz).
- */
-__host__ __device__ void setNetherSeed(NetherNoise *nn, uint64_t seed);
-__host__ __device__ int getNetherBiome(const NetherNoise *nn, int x, int y, int z, float *ndel);
-__host__ __device__ int mapNether2D(const NetherNoise *nn, int *out, int x, int z, int w, int h);
-__host__ __device__ int mapNether3D(const NetherNoise *nn, int *out, Range r, float confidence);
-/**
- * The scaled Nether generation supports scales 1, 4, 16, 64, and 256.
- * It is similar to mapNether3D(), but applies voronoi zoom if necessary, and
- * fills the output buffer with nether_wastes for versions older than 1.16.
- */
-__host__ __device__ int genNetherScaled(const NetherNoise *nn, int *out, Range r, int mc, uint64_t sha);
-
-/**
- * End biome generation is based on simplex noise and varies only at a 1:16
- * chunk scale which can be generated with mapEndBiome(). The function mapEnd()
- * is a variation which also scales this up on a regular grid to 1:4. The final
- * access at a 1:1 scale uses voronoi.
- */
-__host__ __device__ void setEndSeed(EndNoise *en, int mc, uint64_t seed);
-__host__ __device__ int mapEndBiome(const EndNoise *en, int *out, int x, int z, int w, int h);
-__host__ __device__ int mapEnd(const EndNoise *en, int *out, int x, int z, int w, int h);
-__host__ __device__ int getSurfaceHeightEnd(int mc, uint64_t seed, int x, int z);
-/**
- * The scaled End generation supports scales 1, 4, 16, and 64.
- * The End biomes are usually 2D, but in 1.15+ there is 3D voronoi noise, which
- * is controlled by the 'sha' hash of the seed. For scales higher than 1:1, and
- * versions up to 1.14, 'sha' is ignored.
- */
-__host__ __device__ int genEndScaled(const EndNoise *en, int *out, Range r, int mc, uint64_t sha);
 
 /**
  * In 1.18 the Overworld uses a new noise map system for the biome generation.
@@ -242,8 +160,6 @@ __host__ __device__ int sampleBiomeNoise(const BiomeNoise *bn, int64_t *np, int 
 	uint64_t *dat, uint32_t sample_flags);
 __host__ __device__ int sampleBiomeNoiseBeta(const BiomeNoiseBeta *bnb, int64_t *np, double *nv,
 	int x, int z);
-__host__ __device__ double approxSurfaceBeta(const BiomeNoiseBeta *bnb, const SurfaceNoiseBeta *snb,
-	int x, int z); // doesn't really work yet
 
 /**
  * (Alpha 1.2 - Beta 1.7) 
@@ -257,27 +173,7 @@ __host__ __device__ int getOldBetaBiome(float t, float h);
  */
 __host__ __device__ int climateToBiome(int mc, const uint64_t np[6], uint64_t *dat);
 
-/**
- * Initialize BiomeNoise for only a single climate parameter.
- * If nptype == NP_DEPTH, the value is sampled at y=0. Note that this value
- * changes linearly with the height (i.e. -= y/128).
- * A maximum of nmax octaves is set, initializing only the most contributing
- * octaves up to that point. Use -1 for a full initialization.
- */
-__host__ __device__ void setClimateParaSeed(BiomeNoise *bn, uint64_t seed, int large, int nptype, int nmax);
 __host__ __device__ double sampleClimatePara(const BiomeNoise *bn, int64_t *np, double x, double z);
-
-/**
- * Currently, in 1.18, we have to generate biomes one chunk at a time to get an
- * accurate mapping of the biomes in the level storage, as there is no longer a
- * unique mapping from noise points to biomes (MC-241546). Note that the results
- * from this are not suitable for chunk population/structure generation.
- * The output is in the form out[x][y][z] for the 64 biome points in the chunk
- * section. The coordinates {cx,cy,cz} are all at scale 1:16 and the 'dat'
- * argument should be the previous noise sampling and can be left NULL.
- */
-__host__ __device__ void genBiomeNoiseChunkSection(const BiomeNoise *bn, int out[4][4][4],
-	int cx, int cy, int cz, uint64_t *dat);
 
 /**
  * The scaled biome noise generation applies for the Overworld version 1.18+.
@@ -304,32 +200,6 @@ __host__ __device__ Range getVoronoiSrcRange(Range r);
 //==============================================================================
 
 
-__host__ __device__ void initSurfaceNoise(SurfaceNoise *sn, int dim, uint64_t seed)
-{
-	uint64_t s;
-	setSeed(&s, seed);
-	octaveInit(&sn->octmin, &s, sn->oct+0, -15, 16);
-	octaveInit(&sn->octmax, &s, sn->oct+16, -15, 16);
-	octaveInit(&sn->octmain, &s, sn->oct+32, -7, 8);
-	if (dim == DIM_END)
-	{
-		sn->xzScale = 2.0;
-		sn->yScale = 1.0;
-		sn->xzFactor = 80;
-		sn->yFactor = 160;
-	}
-	else // DIM_OVERWORLD
-	{
-		octaveInit(&sn->octsurf, &s, sn->oct+40, -3, 4);
-		skipNextN(&s, 262*10);
-		octaveInit(&sn->octdepth, &s, sn->oct+44, -15, 16);
-		sn->xzScale = 0.9999999814507745;
-		sn->yScale = 0.9999999814507745;
-		sn->xzFactor = 80;
-		sn->yFactor = 160;
-	}
-}
-
 __host__ __device__ void initSurfaceNoiseBeta(SurfaceNoiseBeta *snb, uint64_t seed)
 {
 	uint64_t s;
@@ -342,625 +212,6 @@ __host__ __device__ void initSurfaceNoiseBeta(SurfaceNoiseBeta *snb, uint64_t se
 	octaveInitBeta(&snb->octcontA, &s, snb->oct+40, 10, 1.121, 0.5, 1.0, 2.0);
 	octaveInitBeta(&snb->octcontB, &s, snb->oct+50, 16, 200.0, 0.5, 1.0, 2.0);
 }
-
-__host__ __device__ double sampleSurfaceNoise(const SurfaceNoise *sn, int x, int y, int z)
-{
-	double xzScale = 684.412 * sn->xzScale;
-	double yScale = 684.412 * sn->yScale;
-	double xzStep = xzScale / sn->xzFactor;
-	double yStep = yScale / sn->yFactor;
-
-	double minNoise = 0;
-	double maxNoise = 0;
-	double mainNoise = 0;
-	double persist = 1.0;
-	double dx, dy, dz, sy, ty;
-	int i;
-
-	for (i = 0; i < 16; i++)
-	{
-		dx = maintainPrecision(x * xzScale * persist);
-		dy = maintainPrecision(y * yScale  * persist);
-		dz = maintainPrecision(z * xzScale * persist);
-		sy = yScale * persist;
-		ty = y * sy;
-
-		minNoise += samplePerlin(&sn->octmin.octaves[i], dx, dy, dz, sy, ty) / persist;
-		maxNoise += samplePerlin(&sn->octmax.octaves[i], dx, dy, dz, sy, ty) / persist;
-
-		if (i < 8)
-		{
-			dx = maintainPrecision(x * xzStep * persist);
-			dy = maintainPrecision(y * yStep  * persist);
-			dz = maintainPrecision(z * xzStep * persist);
-			sy = yStep * persist;
-			ty = y * sy;
-			mainNoise += samplePerlin(&sn->octmain.octaves[i], dx, dy, dz, sy, ty) / persist;
-		}
-		persist /= 2.0;
-	}
-
-	return clampedLerp(0.5 + 0.05*mainNoise, minNoise/512.0, maxNoise/512.0);
-}
-
-
-//==============================================================================
-// Nether (1.16+) and End (1.9+) Biome Generation
-//==============================================================================
-
-__host__ __device__ void setNetherSeed(NetherNoise *nn, uint64_t seed)
-{
-	uint64_t s;
-	setSeed(&s, seed);
-	doublePerlinInit(&nn->temperature, &s, &nn->oct[0], &nn->oct[2], -7, 2);
-	setSeed(&s, seed+1);
-	doublePerlinInit(&nn->humidity, &s, &nn->oct[4], &nn->oct[6], -7, 2);
-}
-
-/* Gets the 3D nether biome at scale 1:4 (for 1.16+).
- */
-__host__ __device__ int getNetherBiome(const NetherNoise *nn, int x, int y, int z, float *ndel)
-{
-	const float npoints[5][4] = {
-		{ 0,    0,      0,              nether_wastes       },
-		{ 0,   -0.5,    0,              soul_sand_valley    },
-		{ 0.4,  0,      0,              crimson_forest      },
-		{ 0,    0.5,    0.375*0.375,    warped_forest       },
-		{-0.5,  0,      0.175*0.175,    basalt_deltas       },
-	};
-
-	y = 0;
-	float temp = sampleDoublePerlin(&nn->temperature, x, y, z);
-	float humidity = sampleDoublePerlin(&nn->humidity, x, y, z);
-
-	int i, id = 0;
-	float dmin = FLT_MAX;
-	float dmin2 = FLT_MAX;
-	for (i = 0; i < 5; i++)
-	{
-		float dx = npoints[i][0] - temp;
-		float dy = npoints[i][1] - humidity;
-		float dsq = dx*dx + dy*dy + npoints[i][2];
-		if (dsq < dmin)
-		{
-			dmin2 = dmin;
-			dmin = dsq;
-			id = i;
-		}
-		else if (dsq < dmin2)
-			dmin2 = dsq;
-	}
-
-	if (ndel)
-		*ndel = sqrtf(dmin2) - sqrtf(dmin);
-
-	id = (int) npoints[id][3];
-	return id;
-}
-
-
-__host__ __device__ static void fillRad3D(int *out, int x, int y, int z, int sx, int sy, int sz,
-	int id, float rad)
-{
-	int r, rsq;
-	int i, j, k;
-	r = (int) (rad);
-	if (r <= 0)
-		return;
-	rsq = (int) floor(rad * rad);
-
-	for (k = -r; k <= r; k++)
-	{
-		int ak = y+k;
-		if (ak < 0 || ak >= sy)
-			continue;
-		int ksq = k*k;
-		int *yout = &out[(int64_t)ak*sx*sz];
-
-		for (j = -r; j <= r; j++)
-		{
-			int aj = z+j;
-			if (aj < 0 || aj >= sz)
-				continue;
-			int jksq = j*j + ksq;
-			for (i = -r; i <= r; i++)
-			{
-				int ai = x+i;
-				if (ai < 0 || ai >= sx)
-					continue;
-				int ijksq = i*i + jksq;
-				if (ijksq > rsq)
-					continue;
-
-				yout[(int64_t)aj*sx+ai] = id;
-			}
-		}
-	}
-}
-
-int mapNether3D(const NetherNoise *nn, int *out, Range r, float confidence)
-{
-	int64_t i, j, k;
-	if (r.sy <= 0)
-		r.sy = 1;
-	if (r.scale <= 3)
-	{
-		printf("mapNether3D() invalid scale for this function\n");
-		return 1;
-	}
-	int scale = r.scale / 4;
-
-	memset(out, 0, sizeof(int) * r.sx*r.sy*r.sz);
-
-	// The noisedelta is the distance between the first and second closest
-	// biomes within the noise space. Dividing this by the greatest possible
-	// gradient (~0.05) gives a minimum diameter of voxels around the sample
-	// cell that will have the same biome.
-	float invgrad = 1.0 / (confidence * 0.05 * 2) / scale;
-
-	for (k = 0; k < r.sy; k++)
-	{
-		int *yout = &out[k*r.sx*r.sz];
-
-		for (j = 0; j < r.sz; j++)
-		{
-			for (i = 0; i < r.sx; i++)
-			{
-				if (yout[j*r.sx+i])
-					continue;
-				//yout[j*w+i] = getNetherBiome(nn, x+i, y+k, z+j, NULL);
-				//continue;
-
-				float noisedelta;
-				int xi = (r.x+i)*scale;
-				int yk = (r.y+k);
-				int zj = (r.z+j)*scale;
-				int v = getNetherBiome(nn, xi, yk, zj, &noisedelta);
-				yout[j*r.sx+i] = v;
-				float cellrad = noisedelta * invgrad;
-				fillRad3D(out, i, j, k, r.sx, r.sy, r.sz, v, cellrad);
-			}
-		}
-	}
-	return 0;
-}
-
-int mapNether2D(const NetherNoise *nn, int *out, int x, int z, int w, int h)
-{
-	Range r = {4, x, z, w, h, 0, 1};
-	return mapNether3D(nn, out, r, 1.0);
-}
-
-__host__ __device__ int genNetherScaled(const NetherNoise *nn, int *out, Range r, int mc, uint64_t sha)
-{
-	if (r.scale <= 0) r.scale = 4;
-	if (r.sy == 0) r.sy = 1;
-
-	uint64_t siz = (uint64_t)r.sx*r.sy*r.sz;
-
-	if (mc <= MC_1_15)
-	{
-		uint64_t i;
-		for (i = 0; i < siz; i++)
-			out[i] = nether_wastes;
-		return 0;
-	}
-
-	if (r.scale == 1)
-	{
-		Range s = getVoronoiSrcRange(r);
-		int *src;
-		if (siz > 1)
-		{   // the source range is large enough that we can try optimizing
-			src = out + siz;
-			int err = mapNether3D(nn, src, s, 1.0);
-			if (err)
-				return err;
-		}
-		else
-		{
-			src = NULL;
-		}
-
-		int i, j, k;
-		int *p = out;
-		for (k = 0; k < r.sy; k++)
-		{
-			for (j = 0; j < r.sz; j++)
-			{
-				for (i = 0; i < r.sx; i++)
-				{
-					int x4, z4, y4;
-					voronoiAccess3D(sha, r.x+i, r.y+k, r.z+j, &x4, &y4, &z4);
-					if (src)
-					{
-						x4 -= s.x; y4 -= s.y; z4 -= s.z;
-						*p = src[(int64_t)y4*s.sx*s.sz + (int64_t)z4*s.sx + x4];
-					}
-					else
-					{
-						*p = getNetherBiome(nn, x4, y4, z4, NULL);
-					}
-					p++;
-				}
-			}
-		}
-		return 0;
-	}
-	else
-	{
-		return mapNether3D(nn, out, r, 1.0);
-	}
-}
-
-
-__host__ __device__ void setEndSeed(EndNoise *en, int mc, uint64_t seed)
-{
-	uint64_t s;
-	setSeed(&s, seed);
-	skipNextN(&s, 17292);
-	perlinInit(&en->perlin, &s);
-	en->mc = mc;
-}
-
-__host__ __device__ static int getEndBiome(int hx, int hz, const uint16_t *hmap, int hw)
-{
-	int i, j;
-	const uint16_t ds[26] = { // (25-2*i)*(25-2*i)
-		//  0    1    2    3    4    5    6    7    8    9   10   11   12
-		  625, 529, 441, 361, 289, 225, 169, 121,  81,  49,  25,   9,   1,
-		// 13   14   15   16   17   18   19   20   21   22   23   24,  25
-			1,   9,  25,  49,  81, 121, 169, 225, 289, 361, 441, 529, 625,
-	};
-
-	const uint16_t *p_dsi = ds + (hx < 0);
-	const uint16_t *p_dsj = ds + (hz < 0);
-	const uint16_t *p_elev = hmap;
-	uint32_t h;
-
-	if (abs(hx) <= 15 && abs(hz) <= 15)
-		h = 64 * (hx*hx + hz*hz);
-	else
-		h = 14401;
-
-	for (j = 0; j < 25; j++)
-	{
-		uint16_t dsj = p_dsj[j];
-		uint16_t e;
-		uint32_t u;
-
-		// force unroll for(i=0;i<25;i++) in a cross compatible way
-		#define x5(i,x)    { x; i++; x; i++; x; i++; x; i++; x; i++; }
-		#define for25(i,x) { i = 0; x5(i,x) x5(i,x) x5(i,x) x5(i,x) x5(i,x) }
-		for25(i,
-			if unlikely(e = p_elev[i])
-			{
-				if ((u = (p_dsi[i] + (uint32_t)dsj) * e) < h)
-					h = u;
-			}
-		);
-		#undef for25
-		#undef x5
-		p_elev += hw;
-	}
-
-	if (h < 3600)
-		return end_highlands;
-	else if (h <= 10000)
-		return end_midlands;
-	else if (h <= 14400)
-		return end_barrens;
-
-	return small_end_islands;
-}
-
-__host__ __device__ int mapEndBiome(const EndNoise *en, int *out, int x, int z, int w, int h)
-{
-	int64_t i, j;
-	int64_t hw = w + 26;
-	int64_t hh = h + 26;
-	uint16_t *hmap = (uint16_t*) malloc(sizeof(*hmap) * hw * hh);
-
-	for (j = 0; j < hh; j++)
-	{
-		for (i = 0; i < hw; i++)
-		{
-			int64_t rx = x + i - 12;
-			int64_t rz = z + j - 12;
-			uint64_t rsq = rx * rx + rz * rz;
-			uint16_t v = 0;
-			if (rsq > 4096 && sampleSimplex2D(&en->perlin, rx, rz) < -0.9f)
-			{
-				v = (llabs(rx) * 3439 + llabs(rz) * 147) % 13 + 9;
-				v *= v;
-			}
-			hmap[(int64_t)j*hw+i] = v;
-		}
-	}
-
-	for (j = 0; j < h; j++)
-	{
-		for (i = 0; i < w; i++)
-		{
-			int64_t hx = (i+x);
-			int64_t hz = (j+z);
-			uint64_t rsq = hx * hx + hz * hz;
-
-			if (rsq <= 4096L)
-				out[j*w+i] = the_end;
-			else
-			{
-				hx = 2*hx + 1;
-				hz = 2*hz + 1;
-				if (en->mc >= MC_1_14)
-				{
-					rsq = hx * hx + hz * hz;
-					if ((int)rsq < 0)
-					{
-						out[j*w+i] = small_end_islands;
-						continue;
-					}
-				}
-				uint16_t *p_elev = &hmap[(hz/2-z)*hw + (hx/2-x)];
-				out[j*w+i] = getEndBiome(hx, hz, p_elev, hw);
-			}
-		}
-	}
-
-	free(hmap);
-	return 0;
-}
-
-__host__ __device__ int mapEnd(const EndNoise *en, int *out, int x, int z, int w, int h)
-{
-	int cx = x >> 2;
-	int cz = z >> 2;
-	int64_t cw = ((x+w) >> 2) + 1 - cx;
-	int64_t ch = ((z+h) >> 2) + 1 - cz;
-
-	int *buf = (int*) malloc(sizeof(int) * cw * ch);
-	mapEndBiome(en, buf, cx, cz, cw, ch);
-
-	int i, j;
-
-	for (j = 0; j < h; j++)
-	{
-		int cj = ((z+j) >> 2) - cz;
-		for (i = 0; i < w; i++)
-		{
-			int ci = ((x+i) >> 2) - cx;
-			int v = buf[cj*cw+ci];
-			out[j*w+i] = v;
-		}
-	}
-
-	free(buf);
-	return 0;
-}
-
-/* Samples the End height. The coordinates used here represent eight blocks per
- * cell. By default a range of 12 cells is sampled, which can be overriden for
- * optimization purposes.
- */
-__host__ __device__ float getEndHeightNoise(const EndNoise *en, int x, int z, int range)
-{
-	int hx = x / 2;
-	int hz = z / 2;
-	int oddx = x % 2;
-	int oddz = z % 2;
-	int i, j;
-
-	int64_t h = 64 * (x*(int64_t)x + z*(int64_t)z);
-	if (range == 0)
-		range = 12;
-
-	for (j = -range; j <= range; j++)
-	{
-		for (i = -range; i <= range; i++)
-		{
-			int64_t rx = hx + i;
-			int64_t rz = hz + j;
-			uint64_t rsq = rx*rx + rz*rz;
-			uint16_t v = 0;
-			if (rsq > 4096 && sampleSimplex2D(&en->perlin, rx, rz) < -0.9f)
-			{
-				v = (llabs(rx) * 3439 + llabs(rz) * 147) % 13 + 9;
-				rx = (oddx - i * 2);
-				rz = (oddz - j * 2);
-				rsq = rx*rx + rz*rz;
-				int64_t noise = rsq * v*v;
-				if (noise < h)
-					h = noise;
-			}
-		}
-	}
-
-	float ret = 100 - sqrtf((float) h);
-	if (ret < -100) ret = -100;
-	if (ret > 80) ret = 80;
-	return ret;
-}
-
-__host__ __device__ void sampleNoiseColumnEnd(double column[], const SurfaceNoise *sn,
-		const EndNoise *en, int x, int z, int colymin, int colymax)
-{
-	double depth = getEndHeightNoise(en, x, z, 0) - 8.0f;
-	int y;
-	for (y = colymin; y <= colymax; y++)
-	{
-		double noise = sampleSurfaceNoise(sn, x, y, z);
-		noise += depth; // falloff for the End is just the depth
-		// clamp top and bottom slides from End settings
-		noise = clampedLerp((32 + 46 - y) / 64.0, -3000, noise);
-		noise = clampedLerp((y - 1) / 7.0, -30, noise);
-		column[y - colymin] = noise;
-	}
-}
-
-/* Given bordering noise columns and a fractional position between those,
- * determine the surface block height (i.e. where the interpolated noise > 0).
- * Note that the noise columns should be of size: ncolxz[ colymax-colymin+1 ]
- */
-__host__ __device__ int getSurfaceHeight(
-		const double ncol00[], const double ncol01[],
-		const double ncol10[], const double ncol11[],
-		int colymin, int colymax, int blockspercell, double dx, double dz)
-{
-	int y, celly;
-	for (celly = colymax-1; celly >= colymin; celly--)
-	{
-		int idx = celly - colymin;
-		double v000 = ncol00[idx];
-		double v001 = ncol01[idx];
-		double v100 = ncol10[idx];
-		double v101 = ncol11[idx];
-		double v010 = ncol00[idx+1];
-		double v011 = ncol01[idx+1];
-		double v110 = ncol10[idx+1];
-		double v111 = ncol11[idx+1];
-
-		for (y = blockspercell - 1; y >= 0; y--)
-		{
-			double dy = y / (double) blockspercell;
-			double noise = lerp3(dy, dx, dz, // Note: not x, y, z
-				v000, v010, v100, v110,
-				v001, v011, v101, v111);
-			if (noise > 0)
-				return celly * blockspercell + y;
-		}
-	}
-	return 0;
-}
-
-__host__ __device__ int getSurfaceHeightEnd(int mc, uint64_t seed, int x, int z)
-{
-	EndNoise en;
-	setEndSeed(&en, mc, seed);
-
-	SurfaceNoise sn;
-	initSurfaceNoise(&sn, DIM_END, seed);
-
-	// end noise columns vary on a grid of cell size = eight
-	int cellx = (x >> 3);
-	int cellz = (z >> 3);
-	double dx = (x & 7) / 8.0;
-	double dz = (z & 7) / 8.0;
-
-	// abusing enum for local compile time constants rather than enumeration
-	enum { y0 = 0, y1 = 32, yn = y1-y0+1 };
-	double ncol00[yn];
-	double ncol01[yn];
-	double ncol10[yn];
-	double ncol11[yn];
-	sampleNoiseColumnEnd(ncol00, &sn, &en, cellx, cellz, y0, y1);
-	sampleNoiseColumnEnd(ncol01, &sn, &en, cellx, cellz+1, y0, y1);
-	sampleNoiseColumnEnd(ncol10, &sn, &en, cellx+1, cellz, y0, y1);
-	sampleNoiseColumnEnd(ncol11, &sn, &en, cellx+1, cellz+1, y0, y1);
-
-	return getSurfaceHeight(ncol00, ncol01, ncol10, ncol11, y0, y1, 4, dx, dz);
-}
-
-__host__ __device__ int genEndScaled(const EndNoise *en, int *out, Range r, int mc, uint64_t sha)
-{
-	if (mc < MC_1_0)
-		return 1;
-	if (r.sy == 0)
-		r.sy = 1;
-
-	if (mc <= MC_1_8)
-	{
-		uint64_t i, siz = (uint64_t)r.sx*r.sy*r.sz;
-		for (i = 0; i < siz; i++)
-			out[i] = the_end;
-		return 0;
-	}
-
-	int err, iy;
-
-	if (r.scale == 1)
-	{
-		Range s = getVoronoiSrcRange(r);
-		err = mapEnd(en, out, s.x, s.z, s.sx, s.sz);
-		if (err) return err;
-
-		if (mc <= MC_1_14)
-		{   // up to 1.14 voronoi noise is planar
-			Layer lvoronoi;
-			memset(&lvoronoi, 0, sizeof(Layer));
-			lvoronoi.startSalt = getLayerSalt(10);
-			err = mapVoronoi114(&lvoronoi, out, r.x, r.z, r.sx, r.sz);
-			if (err) return err;
-		}
-		else
-		{   // in 1.15 voronoi noise varies vertically in the End
-			int *src = out + (int64_t)r.sx*r.sy*r.sz;
-			// memmove(src, out, sizeof(int)*s.sx*s.sz);
-			for (size_t __idx = 0; __idx < s.sx*s.sz; ++__idx) src[__idx] = out[__idx];
-			for (iy = 0; iy < r.sy; iy++)
-			{
-				mapVoronoiPlane(
-					sha, out+r.sx*r.sz*iy, src,
-					r.x,r.z,r.sx,r.sz, r.y+iy,
-					s.x,s.z,s.sx,s.sz);
-			}
-			return 0; // 3D expansion is done => return
-		}
-	}
-	else if (r.scale == 4)
-	{
-		err = mapEnd(en, out, r.x, r.z, r.sx, r.sz);
-		if (err) return err;
-	}
-	else if (r.scale == 16)
-	{
-		err = mapEndBiome(en, out, r.x, r.z, r.sx, r.sz);
-		if (err) return err;
-	}
-	else
-	{
-		float d = r.scale / 8.0;
-		int i, j;
-		for (j = 0; j < r.sz; j++)
-		{
-			for (i = 0; i < r.sx; i++)
-			{
-				int64_t hx = (int64_t)((i+r.x) * d);
-				int64_t hz = (int64_t)((j+r.z) * d);
-				uint64_t rsq = hx*hx + hz*hz;
-				if (rsq <= 16384L)
-				{
-					out[j*r.sx+i] = the_end;
-					continue;
-				}
-				else if (mc >= MC_1_14 && (int)(rsq) < 0)
-				{
-					out[j*r.sx+i] = small_end_islands;
-					continue;
-				}
-				float h = getEndHeightNoise(en, hx, hz, 4);
-				if (h > 40)
-					out[j*r.sx+i] = end_highlands;
-				else if (h >= 0)
-					out[j*r.sx+i] = end_midlands;
-				else if (h >= -20)
-					out[j*r.sx+i] = end_barrens;
-				else
-					out[j*r.sx+i] = small_end_islands;
-			}
-		}
-	}
-
-	// expanding 2D into 3D
-	for (iy = 1; iy < r.sy; iy++)
-	{
-		int64_t i, siz = (int64_t)r.sx*r.sz;
-		for (i = 0; i < siz; i++)
-			out[iy*siz + i] = out[i];
-	}
-
-	return 0;
-}
-
 
 //==============================================================================
 // Overworld and Nether Biome Generation 1.18
@@ -1032,16 +283,14 @@ __host__ __device__ static int init_climate_seed(
 	return n;
 }
 
-__host__ __device__ void setBiomeSeed(BiomeNoise *bn, uint64_t seed, int large)
-{
+__host__ __device__ void setBiomeSeed(BiomeNoise *bn, uint64_t seed, int large) {
 	Xoroshiro pxr;
 	xSetSeed(&pxr, seed);
 	uint64_t xlo = xNextLong(&pxr);
 	uint64_t xhi = xNextLong(&pxr);
 
-	int n = 0, i = 0;
-	for (; i < NP_MAX; i++)
-		n += init_climate_seed(&bn->climate[i], bn->oct+n, xlo, xhi, large, i, -1);
+	int n = 0;
+	for (int i = 0; i < NP_MAX; i++) n += init_climate_seed(&bn->climate[i], bn->oct+n, xlo, xhi, large, i, -1);
 
 	if ((size_t)n > sizeof(bn->oct) / sizeof(*bn->oct))
 	{
@@ -1052,18 +301,14 @@ __host__ __device__ void setBiomeSeed(BiomeNoise *bn, uint64_t seed, int large)
 	bn->nptype = -1;
 }
 
-__host__ __device__ void setBetaBiomeSeed(BiomeNoiseBeta *bnb, uint64_t seed)
-{
+__host__ __device__ void setBetaBiomeSeed(BiomeNoiseBeta *bnb, uint64_t seed) {
 	uint64_t seedScratch;
 	setSeed(&seedScratch, seed*9871);
-	octaveInitBeta(bnb->climate, &seedScratch, bnb->oct,
-		4, 0.025/1.5, 0.25, 0.55, 2.0);
+	octaveInitBeta(bnb->climate, &seedScratch, bnb->oct, 4, 0.025/1.5, 0.25, 0.55, 2.0);
 	setSeed(&seedScratch, seed*39811);
-	octaveInitBeta(bnb->climate+1, &seedScratch, bnb->oct+4,
-		4, 0.05/1.5, 1./3, 0.55, 2.0);
+	octaveInitBeta(bnb->climate+1, &seedScratch, bnb->oct+4, 4, 0.05/1.5, 1./3, 0.55, 2.0);
 	setSeed(&seedScratch, seed*0x84a59L);
-	octaveInitBeta(bnb->climate+2, &seedScratch, bnb->oct+8,
-		2, 0.25/1.5, 10./17, 0.55, 2.0);
+	octaveInitBeta(bnb->climate+2, &seedScratch, bnb->oct+8, 2, 0.25/1.5, 10./17, 0.55, 2.0);
 	bnb->nptype = -1;
 }
 
@@ -1237,8 +482,7 @@ __host__ __device__ float getSpline(const Spline *sp, const float *vals)
 	return r;
 }
 
-__host__ __device__ void initBiomeNoise(BiomeNoise *bn, int mc)
-{
+__host__ __device__ void initBiomeNoise(BiomeNoise *bn, int mc) {
 	SplineStack *ss = &bn->ss;
 	memset(ss, 0, sizeof(*ss));
 	Spline *sp = &ss->stack[ss->len++];
@@ -1266,11 +510,8 @@ __host__ __device__ void initBiomeNoise(BiomeNoise *bn, int mc)
 
 
 /// Biome sampler for MC 1.18
-__host__ __device__ int sampleBiomeNoise(const BiomeNoise *bn, int64_t *np, int x, int y, int z,
-	uint64_t *dat, uint32_t sample_flags)
-{
-	if (bn->nptype >= 0)
-	{   // initialized for a specific climate parameter
+__host__ __device__ int sampleBiomeNoise(const BiomeNoise *bn, int64_t *np, int x, int y, int z, uint64_t *dat, uint32_t sample_flags) {
+	if (bn->nptype >= 0) {   // initialized for a specific climate parameter
 		if (np)
 			memset(np, 0, NP_MAX*sizeof(*np));
 		int64_t id = (int64_t) (10000.0 * sampleClimatePara(bn, np, x, z));
@@ -1279,8 +520,7 @@ __host__ __device__ int sampleBiomeNoise(const BiomeNoise *bn, int64_t *np, int 
 
 	float t = 0, h = 0, c = 0, e = 0, d = 0, w = 0;
 	double px = x, pz = z;
-	if (!(sample_flags & SAMPLE_NO_SHIFT))
-	{
+	if (!(sample_flags & SAMPLE_NO_SHIFT)) {
 		px += sampleDoublePerlin(&bn->climate[NP_SHIFT], x, 0, z) * 4.0;
 		pz += sampleDoublePerlin(&bn->climate[NP_SHIFT], z, x, 0) * 4.0;
 	}
@@ -1289,8 +529,7 @@ __host__ __device__ int sampleBiomeNoise(const BiomeNoise *bn, int64_t *np, int 
 	e = sampleDoublePerlin(&bn->climate[NP_EROSION], px, 0, pz);
 	w = sampleDoublePerlin(&bn->climate[NP_WEIRDNESS], px, 0, pz);
 
-	if (!(sample_flags & SAMPLE_NO_DEPTH))
-	{
+	if (!(sample_flags & SAMPLE_NO_DEPTH)) {
 		float np_param[] = {
 			c, e, -3.0F * ( fabsf( fabsf(w) - 0.6666667F ) - 0.33333334F ), w,
 		};
@@ -1313,8 +552,7 @@ __host__ __device__ int sampleBiomeNoise(const BiomeNoise *bn, int64_t *np, int 
 	p_np[5] = (int64_t)(10000.0F*w);
 
 	int id = none;
-	if (!(sample_flags & SAMPLE_NO_BIOME))
-		id = climateToBiome(bn->mc, (const uint64_t*)p_np, dat);
+	if (!(sample_flags & SAMPLE_NO_BIOME)) id = climateToBiome(bn->mc, (const uint64_t*)p_np, dat);
 	return id;
 }
 
@@ -1515,10 +753,11 @@ uint64_t get_np_dist(const uint64_t np[6], const BiomeTree *bt, int idx)
 	return ds;
 }
 
+__host__ __device__
 #if !DEBUG
 static inline ATTR(hot, pure)
 #endif
-__host__ __device__ int get_resulting_node(const uint64_t np[6], const BiomeTree *bt, int idx,
+int get_resulting_node(const uint64_t np[6], const BiomeTree *bt, int idx,
 	int alt, uint64_t ds, int depth)
 {
 	if (bt->steps[depth] == 0)
@@ -1563,8 +802,7 @@ __host__ __device__ int get_resulting_node(const uint64_t np[6], const BiomeTree
 	return leaf;
 }
 
-__host__ __device__ int climateToBiome(int mc, const uint64_t np[6], uint64_t *dat)
-{
+__host__ __device__ int climateToBiome(int mc, const uint64_t np[6], uint64_t *dat) {
 	if (mc < MC_1_18 || mc > MC_NEWEST)
 		return -1;
 	
@@ -1573,43 +811,15 @@ __host__ __device__ int climateToBiome(int mc, const uint64_t np[6], uint64_t *d
 	int idx;
 	uint64_t ds = UINT64_MAX;
 
-	if (dat)
-	{
+	if (dat) {
 		alt = (int) *dat;
 		ds = get_np_dist(np, bt, alt);
 	}
 
 	idx = get_resulting_node(np, bt, 0, alt, ds, 0);
-	if (dat)
-	{
-		*dat = (uint64_t) idx;
-	}
+	if (dat) *dat = (uint64_t) idx;
 	
 	return (bt->nodes[idx] >> 48) & 0xFF;
-}
-
-
-__host__ __device__ void setClimateParaSeed(BiomeNoise *bn, uint64_t seed, int large, int nptype, int nmax)
-{
-	Xoroshiro pxr;
-	xSetSeed(&pxr, seed);
-	uint64_t xlo = xNextLong(&pxr);
-	uint64_t xhi = xNextLong(&pxr);
-	if (nptype == NP_DEPTH)
-	{
-		int n = 0;
-		n += init_climate_seed(bn->climate + NP_CONTINENTALNESS,
-			bn->oct + n, xlo, xhi, large,    NP_CONTINENTALNESS, nmax);
-		n += init_climate_seed(bn->climate + NP_EROSION,
-			bn->oct + n, xlo, xhi, large,    NP_EROSION, nmax);
-		n += init_climate_seed(bn->climate + NP_WEIRDNESS,
-			bn->oct + n, xlo, xhi, large,    NP_WEIRDNESS, nmax);
-	}
-	else
-	{
-		init_climate_seed(bn->climate + nptype, bn->oct, xlo, xhi, large, nptype, nmax);
-	}
-	bn->nptype = nptype;
 }
 
 __host__ __device__ double sampleClimatePara(const BiomeNoise *bn, int64_t *np, double x, double z)
@@ -1642,29 +852,6 @@ __host__ __device__ double sampleClimatePara(const BiomeNoise *bn, int64_t *np, 
 	return p;
 }
 
-__host__ __device__ void genBiomeNoiseChunkSection(const BiomeNoise *bn, int out[4][4][4],
-	int cx, int cy, int cz, uint64_t *dat)
-{
-	uint64_t buf = 0;
-	int i, j, k;
-	int x4 = cx * 4, y4 = cy * 4, z4 = cz * 4;
-	if (dat == NULL)
-		dat = &buf;
-	if (*dat == 0)
-	{   // try to determine the ending point of the last chunk section
-		sampleBiomeNoise(bn, NULL, x4+3, y4-1, z4+3, dat, 0);
-	}
-
-	// iteration order is important
-	for (i = 0; i < 4; ++i) {
-		for (j = 0; j < 4; ++j) {
-			for (k = 0; k < 4; ++k) {
-				out[i][j][k] = sampleBiomeNoise(bn, NULL, x4+i, y4+j, z4+k, dat, 0);
-			}
-		}
-	}
-}
-
 __host__ __device__ static void genBiomeNoise3D(const BiomeNoise *bn, int *out, Range r, int opt)
 {
 	uint64_t dat = 0;
@@ -1690,10 +877,8 @@ __host__ __device__ static void genBiomeNoise3D(const BiomeNoise *bn, int *out, 
 	}
 }
 
-__host__ __device__ int genBiomeNoiseScaled(const BiomeNoise *bn, int *out, Range r, uint64_t sha)
-{
-	if (r.sy == 0)
-		r.sy = 1;
+__host__ __device__ int genBiomeNoiseScaled(const BiomeNoise *bn, int *out, Range r, uint64_t sha) {
+	if (r.sy == 0) r.sy = 1;
 
 	uint64_t siz = (uint64_t)r.sx*r.sy*r.sz;
 	int i, j, k;
@@ -1702,15 +887,11 @@ __host__ __device__ int genBiomeNoiseScaled(const BiomeNoise *bn, int *out, Rang
 	{
 		Range s = getVoronoiSrcRange(r);
 		int *src;
-		if (siz > 1)
-		{   // the source range is large enough that we can try optimizing
+		if (siz > 1) {   // the source range is large enough that we can try optimizing
 			src = out + siz;
 			genBiomeNoise3D(bn, src, s, 0);
 		}
-		else
-		{
-			src = NULL;
-		}
+		else src = NULL;
 
 		int *p = out;
 		for (k = 0; k < r.sy; k++)
@@ -1726,10 +907,7 @@ __host__ __device__ int genBiomeNoiseScaled(const BiomeNoise *bn, int *out, Rang
 						x4 -= s.x; y4 -= s.y; z4 -= s.z;
 						*p = src[(int64_t)y4*s.sx*s.sz + (int64_t)z4*s.sx + x4];
 					}
-					else
-					{
-						*p = sampleBiomeNoise(bn, 0, x4, y4, z4, 0, 0);
-					}
+					else *p = sampleBiomeNoise(bn, 0, x4, y4, z4, 0, 0);
 					p++;
 				}
 			}
@@ -1815,22 +993,7 @@ __host__ __device__ static double lerp4(
 	return b0 + (b1 - b0) * dx;
 }
 
-__host__ __device__ double approxSurfaceBeta(const BiomeNoiseBeta *bnb, const SurfaceNoiseBeta *snb,
-	int x, int z)
-{
-	// TODO: sample vertically to get a more accurate height value
-	double climate[2];
-	sampleBiomeNoiseBeta(bnb, NULL, climate, x, z);
-	double cols[2];
-	SeaLevelColumnNoiseBeta colNoise;
-	genColumnNoise(snb, &colNoise, x*0.25, z*0.25, 0);
-	processColumnNoise(cols, &colNoise, climate);
-	return 63 + (cols[0]*0.125 + cols[1]*0.875) * 0.5;
-}
-
-__host__ __device__ int genBiomeNoiseBetaScaled(const BiomeNoiseBeta *bnb,
-	const SurfaceNoiseBeta *snb, int *out, Range r)
-{
+__host__ __device__ int genBiomeNoiseBetaScaled(const BiomeNoiseBeta *bnb, const SurfaceNoiseBeta *snb, int *out, Range r) {
 	if (!snb || r.scale >= 4)
 	{
 		int i, j;
@@ -1963,90 +1126,6 @@ __host__ __device__ int genBiomeNoiseBetaScaled(const BiomeNoiseBeta *bnb,
 	}
 	return 0;
 }
-
-
-__host__ __device__ int getBiomeDepthAndScale(int id, double *depth, double *scale, int *grass)
-{
-	const int dh = 62; // default height
-	double s = 0, d = 0, g = 0;
-	switch (id) {
-	case ocean:                         s = 0.100; d = -1.000; g = dh; break;
-	case plains:                        s = 0.050; d =  0.125; g = dh; break;
-	case desert:                        s = 0.050; d =  0.125; g =  0; break;
-	case mountains:                     s = 0.500; d =  1.000; g = dh; break;
-	case forest:                        s = 0.200; d =  0.100; g = dh; break;
-	case taiga:                         s = 0.200; d =  0.200; g = dh; break;
-	case swamp:                         s = 0.100; d = -0.200; g = dh; break;
-	case river:                         s = 0.000; d = -0.500; g = 60; break;
-	case frozen_ocean:                  s = 0.100; d = -1.000; g = dh; break;
-	case frozen_river:                  s = 0.000; d = -0.500; g = 60; break;
-	case snowy_tundra:                  s = 0.050; d =  0.125; g = dh; break;
-	case snowy_mountains:               s = 0.300; d =  0.450; g = dh; break;
-	case mushroom_fields:               s = 0.300; d =  0.200; g =  0; break;
-	case mushroom_field_shore:          s = 0.025; d =  0.000; g =  0; break;
-	case beach:                         s = 0.025; d =  0.000; g = 64; break;
-	case desert_hills:                  s = 0.300; d =  0.450; g =  0; break;
-	case wooded_hills:                  s = 0.300; d =  0.450; g = dh; break;
-	case taiga_hills:                   s = 0.300; d =  0.450; g = dh; break;
-	case mountain_edge:                 s = 0.300; d =  0.800; g = dh; break;
-	case jungle:                        s = 0.200; d =  0.100; g = dh; break;
-	case jungle_hills:                  s = 0.300; d =  0.450; g = dh; break;
-	case jungle_edge:                   s = 0.200; d =  0.100; g = dh; break;
-	case deep_ocean:                    s = 0.100; d = -1.800; g = dh; break;
-	case stone_shore:                   s = 0.800; d =  0.100; g = 64; break;
-	case snowy_beach:                   s = 0.025; d =  0.000; g = 64; break;
-	case birch_forest:                  s = 0.200; d =  0.100; g = dh; break;
-	case birch_forest_hills:            s = 0.300; d =  0.450; g = dh; break;
-	case dark_forest:                   s = 0.200; d =  0.100; g = dh; break;
-	case snowy_taiga:                   s = 0.200; d =  0.200; g = dh; break;
-	case snowy_taiga_hills:             s = 0.300; d =  0.450; g = dh; break;
-	case giant_tree_taiga:              s = 0.200; d =  0.200; g = dh; break;
-	case giant_tree_taiga_hills:        s = 0.300; d =  0.450; g = dh; break;
-	case wooded_mountains:              s = 0.500; d =  1.000; g = dh; break;
-	case savanna:                       s = 0.050; d =  0.125; g = dh; break;
-	case savanna_plateau:               s = 0.025; d =  1.500; g = dh; break;
-	case badlands:                      s = 0.200; d =  0.100; g =  0; break;
-	case wooded_badlands_plateau:       s = 0.025; d =  1.500; g =  0; break;
-	case badlands_plateau:              s = 0.025; d =  1.500; g =  0; break;
-	case warm_ocean:                    s = 0.100; d = -1.000; g =  0; break;
-	case lukewarm_ocean:                s = 0.100; d = -1.000; g = dh; break;
-	case cold_ocean:                    s = 0.100; d = -1.000; g = dh; break;
-	case deep_warm_ocean:               s = 0.100; d = -1.800; g =  0; break;
-	case deep_lukewarm_ocean:           s = 0.100; d = -1.800; g = dh; break;
-	case deep_cold_ocean:               s = 0.100; d = -1.800; g = dh; break;
-	case deep_frozen_ocean:             s = 0.100; d = -1.800; g = dh; break;
-	case sunflower_plains:              s = 0.050; d =  0.125; g = dh; break;
-	case desert_lakes:                  s = 0.250; d =  0.225; g =  0; break;
-	case gravelly_mountains:            s = 0.500; d =  1.000; g = dh; break;
-	case flower_forest:                 s = 0.400; d =  0.100; g = dh; break;
-	case taiga_mountains:               s = 0.400; d =  0.300; g = dh; break;
-	case swamp_hills:                   s = 0.300; d = -0.100; g = dh; break;
-	case ice_spikes:                    s = 0.450; d =  0.425; g =  0; break;
-	case modified_jungle:               s = 0.400; d =  0.200; g = dh; break;
-	case modified_jungle_edge:          s = 0.400; d =  0.200; g = dh; break;
-	case tall_birch_forest:             s = 0.400; d =  0.200; g = dh; break;
-	case tall_birch_hills:              s = 0.500; d =  0.550; g = dh; break;
-	case dark_forest_hills:             s = 0.400; d =  0.200; g = dh; break;
-	case snowy_taiga_mountains:         s = 0.400; d =  0.300; g = dh; break;
-	case giant_spruce_taiga:            s = 0.200; d =  0.200; g = dh; break;
-	case giant_spruce_taiga_hills:      s = 0.200; d =  0.200; g = dh; break;
-	case modified_gravelly_mountains:   s = 0.500; d =  1.000; g = dh; break;
-	case shattered_savanna:             s = 1.225; d = 0.3625; g = dh; break;
-	case shattered_savanna_plateau:     s = 1.212; d =  1.050; g = dh; break;
-	case eroded_badlands:               s = 0.200; d =  0.100; g =  0; break;
-	case modified_wooded_badlands_plateau: s = 0.300; d = 0.450; g = 0; break;
-	case modified_badlands_plateau:     s = 0.300; d =  0.450; g =  0; break;
-	case bamboo_jungle:                 s = 0.200; d =  0.100; g = dh; break;
-	case bamboo_jungle_hills:           s = 0.300; d =  0.450; g = dh; break;
-	default:
-		return 0;
-	}
-	if (scale) *scale = s;
-	if (depth) *depth = d;
-	if (grass) *grass = g;
-	return 1;
-}
-
 
 __host__ __device__ Range getVoronoiSrcRange(Range r)
 {
