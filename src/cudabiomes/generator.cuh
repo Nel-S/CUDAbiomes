@@ -34,10 +34,10 @@ STRUCT(Generator) {
 };
 
 
-#ifdef __cplusplus
-extern "C"
-{
-#endif
+// #ifdef __cplusplus
+// extern "C"
+// {
+// #endif
 
 ///=============================================================================
 /// Biome Generation
@@ -91,58 +91,6 @@ __host__ __device__ Layer *setupLayer(Layer *l, mapfunc_t *map, int mc, int8_t z
  */
 __host__ __device__ int genArea(const Layer *layer, int *out, int areaX, int areaZ, int areaWidth, int areaHeight);
 
-__host__ __device__ int mapOceanMixMod(const Layer * l, int * out, int x, int z, int w, int h) {
-	int *otyp;
-	int64_t i, j;
-	l->p2->getMap(l->p2, out, x, z, w, h);
-
-	otyp = (int *) malloc(w*h*sizeof(int));
-	memcpy(otyp, out, w*h*sizeof(int));
-
-	l->p->getMap(l->p, out, x, z, w, h);
-
-
-	for (j = 0; j < h; j++)
-	{
-		for (i = 0; i < w; i++)
-		{
-			int landID, oceanID;
-
-			landID = out[j*w + i];
-
-			if (!isOceanic(landID))
-				continue;
-
-			oceanID = otyp[j*w + i];
-
-			if (landID == deep_ocean)
-			{
-				switch (oceanID)
-				{
-				case lukewarm_ocean:
-					oceanID = deep_lukewarm_ocean;
-					break;
-				case ocean:
-					oceanID = deep_ocean;
-					break;
-				case cold_ocean:
-					oceanID = deep_cold_ocean;
-					break;
-				case frozen_ocean:
-					oceanID = deep_frozen_ocean;
-					break;
-				}
-			}
-
-			out[j*w + i] = oceanID;
-		}
-	}
-
-	free(otyp);
-
-	return 0;
-}
-
 /**
  * Sets up a biome generator for a given MC version. The 'flags' can be used to
  * control LARGE_BIOMES or to FORCE_OCEAN_VARIANTS to enable ocean variants at
@@ -150,34 +98,22 @@ __host__ __device__ int mapOceanMixMod(const Layer * l, int * out, int x, int z,
  */
 __host__ __device__ void setupGenerator(Generator &g, int mc, uint32_t flags) {
 	g.mc = mc;
-	g.dim = DIM_UNDEF;
+	g.dim = DIM_OVERWORLD;
 	g.flags = flags;
 	g.seed = 0;
 	g.sha = 0;
 
 	if (MC_B1_8 <= mc && mc <= MC_1_17) {
+		// printf("AA ");
 		setupLayerStack(&g.ls, mc, flags & LARGE_BIOMES);
+		// printf("AB ");
 		g.entry = NULL;
-		if (flags & FORCE_OCEAN_VARIANTS && mc >= MC_1_13) {
-			g.ls.entry_16 = setupLayer(
-				g.xlayer+2, &mapOceanMixMod, mc, 1, 0, 0,
-				g.ls.entry_16, &g.ls.layers[L_ZOOM_16_OCEAN]);
-
-			g.ls.entry_64 = setupLayer(
-				g.xlayer+3, &mapOceanMixMod, mc, 1, 0, 0,
-				g.ls.entry_64, &g.ls.layers[L_ZOOM_64_OCEAN]);
-
-			g.ls.entry_256 = setupLayer(
-				g.xlayer+4, &mapOceanMixMod, mc, 1, 0, 0,
-				g.ls.entry_256, &g.ls.layers[L_OCEAN_TEMP_256]);
-		}
 	}
 	else if (MC_1_18 <= mc) initBiomeNoise(&g.bn, mc);
 	else g.bnb.mc = mc;
 }
 
 __host__ __device__ void applySeed(Generator &g, uint64_t seed) {
-	g.dim = DIM_OVERWORLD;
 	g.seed = seed;
 	g.sha = 0;
 
@@ -185,7 +121,11 @@ __host__ __device__ void applySeed(Generator &g, uint64_t seed) {
 		setBetaBiomeSeed(&g.bnb, seed);
 		//initSurfaceNoiseBeta(&g->snb, g->seed);
 	}
-	else if (g.mc <= MC_1_17) setLayerSeed(g.entry ? g.entry : g.ls.entry_1, seed);
+	else if (g.mc <= MC_1_17) {
+		printf("BA ");
+		setLayerSeed(g.entry ? g.entry : g.ls.entry_1, seed);
+		printf("BB ");
+	}
 	else /* if (g.mc >= MC_1_18) */ setBiomeSeed(&g.bn, seed, g.flags);
 	if (MC_1_15 <= g.mc) {
 		if (g.mc <= MC_1_17 && !g.entry) g.sha = g.ls.entry_1->startSalt;
@@ -336,19 +276,23 @@ __host__ __device__ Layer *setupLayer(Layer *l, mapfunc_t *map, int mc, int8_t z
 	return l;
 }
 
-__host__ __device__ static void setupScale(Layer *l, int scale) {
-	l->scale = scale;
-	if (l->p)
-		setupScale(l->p, scale * l->zoom);
-	if (l->p2)
-		setupScale(l->p2, scale * l->zoom);
+__host__ __device__ void setupScale(Layer &l, int scale) {
+	l.scale = scale;
+	if (l.p) setupScale(*l.p, scale * l.zoom);
+	if (l.p2) setupScale(*l.p2, scale * l.zoom);
 }
 
 /* Initialize an instance of a layered generator. */
 __host__ __device__ void setupLayerStack(LayerStack *g, int mc, int largeBiomes) {
 	if (mc < MC_1_3) largeBiomes = 0;
 
-	memset(g, 0, sizeof(LayerStack));
+	// cudaMemset(g, 0, sizeof(LayerStack));
+	g->entry_1 = 0;
+	g->entry_4 = 0;
+	g->entry_16 = 0;
+	g->entry_64 = 0;
+	g->entry_256 = 0;
+
 	Layer *p, *l = g->layers;
 	mapfunc_t *map_land = 0;
 	// L: layer
@@ -561,7 +505,6 @@ __host__ __device__ void setupLayerStack(LayerStack *g, int mc, int largeBiomes)
 		if (mc <= MC_1_14) p = setupLayer(l+L_VORONOI_1, mapVoronoi114, mc, 4, 3, 10, p, 0);
 		else p = setupLayer(l+L_VORONOI_1, mapVoronoi, mc, 4, 3, LAYER_INIT_SHA, p, 0);
 	}
-
 	g->entry_1 = p;
 	g->entry_4 = l + (mc <= MC_1_12 ? L_RIVER_MIX_4 : L_OCEAN_MIX_4);
 	if (largeBiomes) {
@@ -577,7 +520,10 @@ __host__ __device__ void setupLayerStack(LayerStack *g, int mc, int largeBiomes)
 		g->entry_64 = l + L_ZOOM_64;
 		g->entry_256 = l + L_BIOME_256;
 	}
-	setupScale(g->entry_1, 1);
+	printf("AAA ");
+	printf("(%d %d) ", g == NULL, g->entry_1 == NULL);
+	if (g->entry_1) setupScale(*g->entry_1, 1); // PROBLEM #1
+	printf("AAB ");
 }
 
 
@@ -622,12 +568,13 @@ __host__ __device__ size_t getMinLayerCacheSize(const Layer *layer, int sizeX, i
 }
 
 __host__ __device__ int genArea(const Layer *layer, int *out, int areaX, int areaZ, int areaWidth, int areaHeight) {
-	memset(out, 0, sizeof(*out)*areaWidth*areaHeight);
+	// cudaMemset(out, 0, sizeof(*out)*areaWidth*areaHeight);
+	for (size_t __index = 0; __index < areaWidth*areaHeight; ++__index) out[__index] = 0;
 	return layer->getMap(layer, out, areaX, areaZ, areaWidth, areaHeight);
 }
 
-#ifdef __cplusplus
-}
-#endif
+// #ifdef __cplusplus
+// }
+// #endif
 
 #endif /* GENERATOR_H_ */

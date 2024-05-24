@@ -124,10 +124,10 @@ STRUCT(LayerStack)
 };
 
 
-#ifdef __cplusplus
-extern "C"
-{
-#endif
+// #ifdef __cplusplus
+// extern "C"
+// {
+// #endif
 
 //==============================================================================
 // BiomeID Helpers
@@ -445,34 +445,24 @@ __host__ __device__ int isSnowy(int id)
 // Essentials
 //==============================================================================
 
-__host__ __device__ void setLayerSeed(Layer *layer, uint64_t worldSeed)
-{
-	if (layer->p2 != NULL)
-		setLayerSeed(layer->p2, worldSeed);
-
-	if (layer->p != NULL)
-		setLayerSeed(layer->p, worldSeed);
-
-	if (layer->noise != NULL)
-	{
-		uint64_t s;
-		setSeed(&s, worldSeed);
-		perlinInit((PerlinNoise*)layer->noise, &s);
+__host__ __device__ void setLayerSeed(Layer *layer, uint64_t worldSeed) {
+	printf("BBA ");
+	if (layer->p2) setLayerSeed(layer->p2, worldSeed);
+	printf("BBB ");
+	if (layer->p) setLayerSeed(layer->p, worldSeed);
+	printf("BBC ");
+	if (layer->noise) {
+		Random random(worldSeed);
+		perlinInit((PerlinNoise*)layer->noise, random);
 	}
 
 	uint64_t ls = layer->layerSalt;
-	if (ls == 0)
-	{   // Pre 1.13 the Hills branch stays zero-initialized
-		layer->startSalt = 0;
-		layer->startSeed = 0;
-	}
-	else if (ls == LAYER_INIT_SHA)
-	{   // Post 1.14 Voronoi uses SHA256 for initialization
+	if (!ls) { // Pre 1.13 the Hills branch stays zero-initialized
+		layer->startSalt = layer->startSeed = 0;
+	} else if (ls == LAYER_INIT_SHA) { // Post 1.14 Voronoi uses SHA256 for initialization
 		layer->startSalt = getVoronoiSHA(worldSeed);
 		layer->startSeed = 0;
-	}
-	else
-	{
+	} else {
 		uint64_t st = worldSeed;
 		st = mcStepSeed(st, ls);
 		st = mcStepSeed(st, ls);
@@ -2623,8 +2613,8 @@ __host__ __device__ void voronoiAccess3D(uint64_t sha, int x, int y, int z, int 
 }
 
 
-#ifdef __cplusplus
-}
-#endif
+// #ifdef __cplusplus
+// }
+// #endif
 
 #endif /* LAYER_H_ */

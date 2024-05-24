@@ -115,10 +115,10 @@ STRUCT(BiomeNoiseBeta)
 };
 
 
-#ifdef __cplusplus
-extern "C"
-{
-#endif
+// #ifdef __cplusplus
+// extern "C"
+// {
+// #endif
 
 //==============================================================================
 // Globals
@@ -200,79 +200,65 @@ __host__ __device__ Range getVoronoiSrcRange(Range r);
 //==============================================================================
 
 
-__host__ __device__ void initSurfaceNoiseBeta(SurfaceNoiseBeta *snb, uint64_t seed)
-{
-	uint64_t s;
-	setSeed(&s, seed);
-
-	octaveInitBeta(&snb->octmin, &s, snb->oct+0, 16, 684.412, 0.5, 1.0, 2.0);
-	octaveInitBeta(&snb->octmax, &s, snb->oct+16, 16, 684.412, 0.5, 1.0, 2.0);
-	octaveInitBeta(&snb->octmain, &s, snb->oct+32, 8, 684.412/80.0, 0.5, 1.0, 2.0);
-	skipNextN(&s, 262*8);
-	octaveInitBeta(&snb->octcontA, &s, snb->oct+40, 10, 1.121, 0.5, 1.0, 2.0);
-	octaveInitBeta(&snb->octcontB, &s, snb->oct+50, 16, 200.0, 0.5, 1.0, 2.0);
+__host__ __device__ void initSurfaceNoiseBeta(SurfaceNoiseBeta *snb, uint64_t seed) {
+	Random random(seed);
+	octaveInitBeta(&snb->octmin, random, snb->oct+0, 16, 684.412, 0.5, 1.0, 2.0);
+	octaveInitBeta(&snb->octmax, random, snb->oct+16, 16, 684.412, 0.5, 1.0, 2.0);
+	octaveInitBeta(&snb->octmain, random, snb->oct+32, 8, 684.412/80.0, 0.5, 1.0, 2.0);
+	random.skip<262*8>();
+	octaveInitBeta(&snb->octcontA, random, snb->oct+40, 10, 1.121, 0.5, 1.0, 2.0);
+	octaveInitBeta(&snb->octcontB, random, snb->oct+50, 16, 200.0, 0.5, 1.0, 2.0);
 }
 
 //==============================================================================
 // Overworld and Nether Biome Generation 1.18
 //==============================================================================
 
-__host__ __device__ static int init_climate_seed(
-	DoublePerlinNoise *dpn, PerlinNoise *oct,
-	uint64_t xlo, uint64_t xhi, int large, int nptype, int nmax
-	)
-{
+__host__ __device__ static int init_climate_seed(DoublePerlinNoise *dpn, PerlinNoise *oct, uint64_t xlo, uint64_t xhi, int large, int nptype, int nmax) {
 	Xoroshiro pxr;
 	int n = 0;
 
-	switch (nptype)
-	{
+	switch (nptype) {
 	case NP_SHIFT: {
 		static const double amp[] = {1, 1, 1, 0};
 		// md5 "minecraft:offset"
-		pxr.lo = xlo ^ 0x080518cf6af25384;
-		pxr.hi = xhi ^ 0x3f3dfb40a54febd5;
-		n += xDoublePerlinInit(dpn, &pxr, oct, amp, -3, 4, nmax);
+		pxr = Xoroshiro::withState(xlo ^ 0x080518cf6af25384, xhi ^ 0x3f3dfb40a54febd5);
+		n += doublePerlinInit(dpn, pxr, oct, amp, -3, 4, nmax);
 		} break;
 
 	case NP_TEMPERATURE: {
 		static const double amp[] = {1.5, 0, 1, 0, 0, 0};
 		// md5 "minecraft:temperature" or "minecraft:temperature_large"
-		pxr.lo = xlo ^ (large ? 0x944b0073edf549db : 0x5c7e6b29735f0d7f);
-		pxr.hi = xhi ^ (large ? 0x4ff44347e9d22b96 : 0xf7d86f1bbc734988);
-		n += xDoublePerlinInit(dpn, &pxr, oct, amp, large ? -12 : -10, 6, nmax);
+		pxr = Xoroshiro::withState(xlo ^ (large ? 0x944b0073edf549db : 0x5c7e6b29735f0d7f), xhi ^ (large ? 0x4ff44347e9d22b96 : 0xf7d86f1bbc734988));
+		n += doublePerlinInit(dpn, pxr, oct, amp, large ? -12 : -10, 6, nmax);
 		} break;
 
 	case NP_HUMIDITY: {
 		static const double amp[] = {1, 1, 0, 0, 0, 0};
 		// md5 "minecraft:vegetation" or "minecraft:vegetation_large"
-		pxr.lo = xlo ^ (large ? 0x71b8ab943dbd5301 : 0x81bb4d22e8dc168e);
-		pxr.hi = xhi ^ (large ? 0xbb63ddcf39ff7a2b : 0xf1c8b4bea16303cd);
-		n += xDoublePerlinInit(dpn, &pxr, oct, amp, large ? -10 : -8, 6, nmax);
+		pxr = Xoroshiro::withState(xlo ^ (large ? 0x71b8ab943dbd5301 : 0x81bb4d22e8dc168e), xhi ^ (large ? 0xbb63ddcf39ff7a2b : 0xf1c8b4bea16303cd));
+		n += doublePerlinInit(dpn, pxr, oct, amp, large ? -10 : -8, 6, nmax);
 		} break;
 
 	case NP_CONTINENTALNESS: {
 		static const double amp[] = {1, 1, 2, 2, 2, 1, 1, 1, 1};
 		// md5 "minecraft:continentalness" or "minecraft:continentalness_large"
-		pxr.lo = xlo ^ (large ? 0x9a3f51a113fce8dc : 0x83886c9d0ae3a662);
-		pxr.hi = xhi ^ (large ? 0xee2dbd157e5dcdad : 0xafa638a61b42e8ad);
-		n += xDoublePerlinInit(dpn, &pxr, oct, amp, large ? -11 : -9, 9, nmax);
+		pxr = Xoroshiro::withState(xlo ^ (large ? 0x9a3f51a113fce8dc : 0x83886c9d0ae3a662), xhi ^ (large ? 0xee2dbd157e5dcdad : 0xafa638a61b42e8ad));
+		n += doublePerlinInit(dpn, pxr, oct, amp, large ? -11 : -9, 9, nmax);
 		} break;
 
 	case NP_EROSION: {
 		static const double amp[] = {1, 1, 0, 1, 1};
 		// md5 "minecraft:erosion" or "minecraft:erosion_large"
-		pxr.lo = xlo ^ (large ? 0x8c984b1f8702a951 : 0xd02491e6058f6fd8);
-		pxr.hi = xhi ^ (large ? 0xead7b1f92bae535f : 0x4792512c94c17a80);
-		n += xDoublePerlinInit(dpn, &pxr, oct, amp, large ? -11 : -9, 5, nmax);
+		pxr = Xoroshiro::withState(xlo ^ (large ? 0x8c984b1f8702a951 : 0xd02491e6058f6fd8), xhi ^ (large ? 0xead7b1f92bae535f : 0x4792512c94c17a80));
+		n += doublePerlinInit(dpn, pxr, oct, amp, large ? -11 : -9, 5, nmax);
 		} break;
 
 	case NP_WEIRDNESS: {
 		static const double amp[] = {1, 2, 1, 0, 0, 0};
 		// md5 "minecraft:ridge"
-		pxr.lo = xlo ^ 0xefc8ef4d36102b34;
-		pxr.hi = xhi ^ 0x1beeeb324a0f24ea;
-		n += xDoublePerlinInit(dpn, &pxr, oct, amp, -7, 6, nmax);
+		pxr = Xoroshiro::withState(xlo ^ 0xefc8ef4d36102b34, xhi ^ 0x1beeeb324a0f24ea);
+		n += doublePerlinInit(dpn, pxr, oct, amp, -7, 6, nmax);
 		} break;
 
 	default:
@@ -284,16 +270,14 @@ __host__ __device__ static int init_climate_seed(
 }
 
 __host__ __device__ void setBiomeSeed(BiomeNoise *bn, uint64_t seed, int large) {
-	Xoroshiro pxr;
-	xSetSeed(&pxr, seed);
-	uint64_t xlo = xNextLong(&pxr);
-	uint64_t xhi = xNextLong(&pxr);
+	Xoroshiro pxr(seed);
+	uint64_t xlo = pxr.nextLong();
+	uint64_t xhi = pxr.nextLong();
 
 	int n = 0;
 	for (int i = 0; i < NP_MAX; i++) n += init_climate_seed(&bn->climate[i], bn->oct+n, xlo, xhi, large, i, -1);
 
-	if ((size_t)n > sizeof(bn->oct) / sizeof(*bn->oct))
-	{
+	if ((size_t)n > sizeof(bn->oct) / sizeof(*bn->oct)) {
 		printf("setBiomeSeed(): BiomeNoise is malformed, buffer too small\n");
 		// exit(1);
 		return;
@@ -302,13 +286,12 @@ __host__ __device__ void setBiomeSeed(BiomeNoise *bn, uint64_t seed, int large) 
 }
 
 __host__ __device__ void setBetaBiomeSeed(BiomeNoiseBeta *bnb, uint64_t seed) {
-	uint64_t seedScratch;
-	setSeed(&seedScratch, seed*9871);
-	octaveInitBeta(bnb->climate, &seedScratch, bnb->oct, 4, 0.025/1.5, 0.25, 0.55, 2.0);
-	setSeed(&seedScratch, seed*39811);
-	octaveInitBeta(bnb->climate+1, &seedScratch, bnb->oct+4, 4, 0.05/1.5, 1./3, 0.55, 2.0);
-	setSeed(&seedScratch, seed*0x84a59L);
-	octaveInitBeta(bnb->climate+2, &seedScratch, bnb->oct+8, 2, 0.25/1.5, 10./17, 0.55, 2.0);
+	Random random(seed*9871);
+	octaveInitBeta(bnb->climate, random, bnb->oct, 4, 0.025/1.5, 0.25, 0.55, 2.0);
+	random.setSeed(seed*39811);
+	octaveInitBeta(bnb->climate+1, random, bnb->oct+4, 4, 0.05/1.5, 1./3, 0.55, 2.0);
+	random.setSeed(seed*543321);
+	octaveInitBeta(bnb->climate+2, random, bnb->oct+8, 2, 0.25/1.5, 10./17, 0.55, 2.0);
 	bnb->nptype = -1;
 }
 
@@ -732,11 +715,7 @@ __host__ __device__ int getOldBetaBiome(float t, float h)
 
 
 __host__ __device__ 
-#if !DEBUG
-static inline ATTR(hot, pure, always_inline)
-#endif
-uint64_t get_np_dist(const uint64_t np[6], const BiomeTree *bt, int idx)
-{
+static inline ATTR(hot, pure, always_inline) uint64_t get_np_dist(const uint64_t np[6], const BiomeTree *bt, int idx) {
 	uint64_t ds = 0, node = bt->nodes[idx];
 	uint64_t a, b, d;
 	uint32_t i;
@@ -753,22 +732,13 @@ uint64_t get_np_dist(const uint64_t np[6], const BiomeTree *bt, int idx)
 	return ds;
 }
 
-__host__ __device__
-#if !DEBUG
-static inline ATTR(hot, pure)
-#endif
-int get_resulting_node(const uint64_t np[6], const BiomeTree *bt, int idx,
-	int alt, uint64_t ds, int depth)
-{
-	if (bt->steps[depth] == 0)
-		return idx;
+__host__ __device__ static inline ATTR(hot, pure) int get_resulting_node(const uint64_t np[6], const BiomeTree *bt, int idx, int alt, uint64_t ds, int depth) {
+	if (!bt->steps[depth]) return idx;
 	uint32_t step;
-	do
-	{
+	do {
 		step = bt->steps[depth];
-		depth++;
-	}
-	while (idx+step >= bt->len);
+		++depth;
+	} while (idx + step >= bt->len);
 
 	uint64_t node = bt->nodes[idx];
 	uint16_t inner = node >> 48;
@@ -776,35 +746,25 @@ int get_resulting_node(const uint64_t np[6], const BiomeTree *bt, int idx,
 	int leaf = alt;
 	uint32_t i, n;
 
-	for (i = 0, n = bt->order; i < n; i++)
-	{
+	for (i = 0, n = bt->order; i < n; i++) {
 		uint64_t ds_inner = get_np_dist(np, bt, inner);
-		if (ds_inner < ds)
-		{
+		if (ds_inner < ds) {
 			int leaf2 = get_resulting_node(np, bt, inner, leaf, ds, depth);
-			uint64_t ds_leaf2;
-			if (inner == leaf2)
-				ds_leaf2 = ds_inner;
-			else
-				ds_leaf2 = get_np_dist(np, bt, leaf2);
-			if (ds_leaf2 < ds)
-			{
+			uint64_t ds_leaf2 = (inner == leaf2) ? ds_inner : get_np_dist(np, bt, leaf2);
+			if (ds_leaf2 < ds) {
 				ds = ds_leaf2;
 				leaf = leaf2;
 			}
 		}
 
 		inner += step;
-		if (inner >= bt->len)
-			break;
+		if (inner >= bt->len) break;
 	}
-
 	return leaf;
 }
 
 __host__ __device__ int climateToBiome(int mc, const uint64_t np[6], uint64_t *dat) {
-	if (mc < MC_1_18 || mc > MC_NEWEST)
-		return -1;
+	if (mc < MC_1_18 || MC_NEWEST < mc) return -1;
 	
 	const BiomeTree *bt = &g_btree[mc - MC_1_18];
 	int alt = 0;
@@ -1158,8 +1118,8 @@ __host__ __device__ Range getVoronoiSrcRange(Range r)
 }
 
 
-#ifdef __cplusplus
-}
-#endif
+// #ifdef __cplusplus
+// }
+// #endif
 
 #endif /* BIOMENOISE_H_ */

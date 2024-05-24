@@ -5,66 +5,27 @@
 #include <cmath>
 #include <cstdio>
 
-STRUCT(PerlinNoise)
-{
-	uint8_t d[256+1];
+STRUCT(PerlinNoise) {
+	uint8_t d[257];
 	uint8_t h2;
-	double a, b, c;
-	double amplitude;
-	double lacunarity;
-	double d2;
-	double t2;
+	double a, b, c, amplitude, lacunarity, d2, t2;
 };
 
-STRUCT(OctaveNoise)
-{
+STRUCT(OctaveNoise) {
 	int octcnt;
 	PerlinNoise *octaves;
 };
 
-STRUCT(DoublePerlinNoise)
-{
+STRUCT(DoublePerlinNoise) {
 	double amplitude;
 	OctaveNoise octA;
 	OctaveNoise octB;
 };
 
-#ifdef __cplusplus
-extern "C"
-{
-#endif
-
-/// Perlin noise
-__host__ __device__ void perlinInit(PerlinNoise *noise, uint64_t *seed);
-__host__ __device__ void xPerlinInit(PerlinNoise *noise, Xoroshiro *xr);
-
-__host__ __device__ double samplePerlin(const PerlinNoise *noise, double x, double y, double z, double yamp, double ymin);
-__host__ __device__ double sampleSimplex2D(const PerlinNoise *noise, double x, double y);
-
-/// Perlin Octaves
-__host__ __device__ void octaveInit(OctaveNoise *noise, uint64_t *seed, PerlinNoise *octaves,
-		int omin, int len);
-__host__ __device__ void octaveInitBeta(OctaveNoise *noise, uint64_t *seed, PerlinNoise *octaves,
-		int octcnt, double lac, double lacMul, double persist, double persistMul);
-__host__ __device__ int xOctaveInit(OctaveNoise *noise, Xoroshiro *xr, PerlinNoise *octaves,
-		const double *amplitudes, int omin, int len, int nmax);
-
-__host__ __device__ double sampleOctave(const OctaveNoise *noise, double x, double y, double z);
-__host__ __device__ double sampleOctaveAmp(const OctaveNoise *noise, double x, double y, double z,
-		double yamp, double ymin, int ydefault);
-__host__ __device__ double sampleOctaveBeta17Biome(const OctaveNoise *noise, double x, double z);
-__host__ __device__ void sampleOctaveBeta17Terrain(const OctaveNoise *noise, double *v,
-		double x, double z, int yLacFlag, double lacmin);
-
-/// Double Perlin
-__host__ __device__ void doublePerlinInit(DoublePerlinNoise *noise, uint64_t *seed,
-		PerlinNoise *octavesA, PerlinNoise *octavesB, int omin, int len);
-__host__ __device__ int xDoublePerlinInit(DoublePerlinNoise *noise, Xoroshiro *xr,
-		PerlinNoise *octaves, const double *amplitudes, int omin, int len, int nmax);
-
-__host__ __device__ double sampleDoublePerlin(const DoublePerlinNoise *noise,
-		double x, double y, double z);
-
+// #ifdef __cplusplus
+// extern "C"
+// {
+// #endif
 
 // grad()
 #if 0
@@ -82,50 +43,38 @@ __host__ __device__ static double indexedLerp(int idx, double d1, double d2, dou
 }
 #else
 __host__ __device__ ATTR(hot, const)
-static inline double indexedLerp(uint8_t idx, double a, double b, double c)
-{
-   switch (idx & 0xf)
-   {
-   case 0:  return  a + b;
-   case 1:  return -a + b;
-   case 2:  return  a - b;
-   case 3:  return -a - b;
-   case 4:  return  a + c;
-   case 5:  return -a + c;
-   case 6:  return  a - c;
-   case 7:  return -a - c;
-   case 8:  return  b + c;
-   case 9:  return -b + c;
-   case 10: return  b - c;
-   case 11: return -b - c;
-   case 12: return  a + b;
-   case 13: return -b + c;
-   case 14: return -a + b;
-   case 15: return -b - c;
-   }
-//    UNREACHABLE();
-   return 0;
+static inline double indexedLerp(uint8_t idx, double a, double b, double c) {
+	switch (idx & 0xf) {
+		case 0: case 12: return  a + b;
+		case 1: case 14: return -a + b;
+		case 2:  return  a - b;
+		case 3:  return -a - b;
+		case 4:  return  a + c;
+		case 5:  return -a + c;
+		case 6:  return  a - c;
+		case 7:  return -a - c;
+		case 8:  return  b + c;
+		case 9: case 13: return -b + c;
+		case 10: return  b - c;
+		case 11: case 15: return -b - c;
+	}
+	return 0;
 }
 #endif
 
-__host__ __device__ void perlinInit(PerlinNoise *noise, uint64_t *seed)
-{
+__host__ __device__ void perlinInit(PerlinNoise *noise, Random &random) {
 	int i = 0;
 	//memset(noise, 0, sizeof(*noise));
-	noise->a = nextDouble(seed) * 256.0;
-	noise->b = nextDouble(seed) * 256.0;
-	noise->c = nextDouble(seed) * 256.0;
+	noise->a = random.nextDouble() * 256.0;
+	noise->b = random.nextDouble() * 256.0;
+	noise->c = random.nextDouble() * 256.0;
 	noise->amplitude = 1.0;
 	noise->lacunarity = 1.0;
 
 	uint8_t *idx = noise->d;
-	for (i = 0; i < 256; i++)
-	{
-		idx[i] = i;
-	}
-	for (i = 0; i < 256; i++)
-	{
-		int j = nextInt(seed, 256 - i) + i;
+	for (i = 0; i < 256; i++) idx[i] = i;
+	for (i = 0; i < 256; i++) {
+		int j = random.nextInt(256 - i) + i;
 		uint8_t n = idx[i];
 		idx[i] = idx[j];
 		idx[j] = n;
@@ -138,24 +87,19 @@ __host__ __device__ void perlinInit(PerlinNoise *noise, uint64_t *seed)
 	noise->t2 = d2*d2*d2 * (d2 * (d2*6.0-15.0) + 10.0);
 }
 
-__host__ __device__ void xPerlinInit(PerlinNoise *noise, Xoroshiro *xr)
-{
+__host__ __device__ void perlinInit(PerlinNoise *noise, Xoroshiro &random) {
 	int i = 0;
 	//memset(noise, 0, sizeof(*noise));
-	noise->a = xNextDouble(xr) * 256.0;
-	noise->b = xNextDouble(xr) * 256.0;
-	noise->c = xNextDouble(xr) * 256.0;
+	noise->a = random.nextDouble() * 256.0;
+	noise->b = random.nextDouble() * 256.0;
+	noise->c = random.nextDouble() * 256.0;
 	noise->amplitude = 1.0;
 	noise->lacunarity = 1.0;
 
 	uint8_t *idx = noise->d;
-	for (i = 0; i < 256; i++)
-	{
-		idx[i] = i;
-	}
-	for (i = 0; i < 256; i++)
-	{
-		int j = xNextInt(xr, 256 - i) + i;
+	for (i = 0; i < 256; i++) idx[i] = i;
+	for (i = 0; i < 256; i++) {
+		int j = random.nextInt(256 - i) + i;
 		uint8_t n = idx[i];
 		idx[i] = idx[j];
 		idx[j] = n;
@@ -174,14 +118,11 @@ __host__ __device__ double samplePerlin(const PerlinNoise *noise, double d1, dou
 	uint8_t h1, h2, h3;
 	double t1, t2, t3;
 
-	if (d2 == 0.0)
-	{
+	if (d2 == 0.0) {
 		d2 = noise->d2;
 		h2 = noise->h2;
 		t2 = noise->t2;
-	}
-	else
-	{
+	} else {
 		d2 += noise->b;
 		double i2 = floor(d2);
 		d2 -= i2;
@@ -269,9 +210,7 @@ __host__ __device__ double samplePerlin(const PerlinNoise *noise, double d1, dou
 	return lerp(t3, l1, l5);
 }
 
-__host__ __device__ static void samplePerlinBeta17Terrain(const PerlinNoise *noise, double *v,
-		double d1, double d3, double yLacAmp)
-{
+__host__ __device__ static void samplePerlinBeta17Terrain(const PerlinNoise *noise, double *v, double d1, double d3, double yLacAmp) {
 	int genFlag = -1;
 	double l1 = 0;
 	double l3 = 0;
@@ -352,17 +291,14 @@ __host__ __device__ static void samplePerlinBeta17Terrain(const PerlinNoise *noi
 	}
 }
 
-__host__ __device__ static double simplexGrad(int idx, double x, double y, double z, double d)
-{
+__host__ __device__ static double simplexGrad(int idx, double x, double y, double z, double d) {
 	double con = d - x*x - y*y - z*z;
-	if (con < 0)
-		return 0;
+	if (con < 0) return 0;
 	con *= con;
 	return con * con * indexedLerp(idx, x, y, z);
 }
 
-__host__ __device__ double sampleSimplex2D(const PerlinNoise *noise, double x, double y)
-{
+__host__ __device__ double sampleSimplex2D(const PerlinNoise *noise, double x, double y) {
 	const double SKEW = 0.5 * (sqrtf(3) - 1.0);
 	const double UNSKEW = (3.0 - sqrtf(3)) / 6.0;
 
@@ -391,55 +327,10 @@ __host__ __device__ double sampleSimplex2D(const PerlinNoise *noise, double x, d
 	return 70.0 * t;
 }
 
-__host__ __device__ void octaveInit(OctaveNoise *noise, uint64_t *seed, PerlinNoise *octaves,
-		int omin, int len)
-{
+__host__ __device__ void octaveInitBeta(OctaveNoise *noise, Random &random, PerlinNoise *octaves, int octcnt, double lac, double lacMul, double persist, double persistMul) {
 	int i;
-	int end = omin+len-1;
-	double persist = 1.0 / ((1LL << len) - 1.0);
-	double lacuna = pow(2.0, end);
-
-	if (len < 1 || end > 0)
-	{
-		printf("octavePerlinInit(): unsupported octave range\n");
-		return;
-	}
-
-	if (end == 0)
-	{
-		perlinInit(&octaves[0], seed);
-		octaves[0].amplitude = persist;
-		octaves[0].lacunarity = lacuna;
-		persist *= 2.0;
-		lacuna *= 0.5;
-		i = 1;
-	}
-	else
-	{
-		skipNextN(seed, -end*262);
-		i = 0;
-	}
-
-	for (; i < len; i++)
-	{
-		perlinInit(&octaves[i], seed);
-		octaves[i].amplitude = persist;
-		octaves[i].lacunarity = lacuna;
-		persist *= 2.0;
-		lacuna *= 0.5;
-	}
-
-	noise->octaves = octaves;
-	noise->octcnt = len;
-}
-
-__host__ __device__ void octaveInitBeta(OctaveNoise *noise, uint64_t *seed, PerlinNoise *octaves,
-	int octcnt, double lac, double lacMul, double persist, double persistMul)
-{
-	int i;
-	for (i = 0; i < octcnt; i++)
-	{
-		perlinInit(&octaves[i], seed);
+	for (i = 0; i < octcnt; i++) {
+		perlinInit(&octaves[i], random);
 		octaves[i].amplitude = persist;
 		octaves[i].lacunarity = lac;
 		persist *= persistMul;
@@ -449,9 +340,7 @@ __host__ __device__ void octaveInitBeta(OctaveNoise *noise, uint64_t *seed, Perl
 	noise->octcnt = octcnt;
 }
 
-__host__ __device__ int xOctaveInit(OctaveNoise *noise, Xoroshiro *xr, PerlinNoise *octaves,
-		const double *amplitudes, int omin, int len, int nmax)
-{
+__host__ __device__ int octaveInit(OctaveNoise *noise, Xoroshiro &random, PerlinNoise *octaves, const double *amplitudes, int omin, int len, int nmax) {
 	static const uint64_t md5_octave_n[][2] = {
 		{0xb198de63a8012672, 0x7b84cad43ef7b5a8}, // md5 "octave_-12"
 		{0x0fd787bfbc403ec3, 0x74a4a31ca21b48b8}, // md5 "octave_-11"
@@ -474,28 +363,16 @@ __host__ __device__ int xOctaveInit(OctaveNoise *noise, Xoroshiro *xr, PerlinNoi
 	static const double persist_ini[] = { // len = 4..9
 		0, 1, 2./3, 4./7, 8./15, 16./31, 32./63, 64./127, 128./255, 256./511,
 	};
-#if DEBUG
-	if (-omin < 0 || -omin >= (int) (sizeof(lacuna_ini)/sizeof(double)) ||
-		len < 0 || len >= (int) (sizeof(persist_ini)/sizeof(double)))
-	{
-		printf("Fatal: octave initialization out of range\n");
-		exit(1);
-	}
-#endif
 	double lacuna = lacuna_ini[-omin];
 	double persist = persist_ini[len];
-	uint64_t xlo = xNextLong(xr);
-	uint64_t xhi = xNextLong(xr);
+	uint64_t xlo = random.nextLong();
+	uint64_t xhi = random.nextLong();
 	int i = 0, n = 0;
 
-	for (; i < len && n != nmax; i++, lacuna *= 2.0, persist *= 0.5)
-	{
-		if (amplitudes[i] == 0)
-			continue;
-		Xoroshiro pxr;
-		pxr.lo = xlo ^ md5_octave_n[12 + omin + i][0];
-		pxr.hi = xhi ^ md5_octave_n[12 + omin + i][1];
-		xPerlinInit(&octaves[n], &pxr);
+	for (; i < len && n != nmax; i++, lacuna *= 2.0, persist *= 0.5) {
+		if (!amplitudes[i]) continue;
+		Xoroshiro pxr = Xoroshiro::withState(xlo ^ md5_octave_n[12 + omin + i][0], xhi ^ md5_octave_n[12 + omin + i][1]);
+		perlinInit(&octaves[n], pxr);
 		octaves[n].amplitude = amplitudes[i] * persist;
 		octaves[n].lacunarity = lacuna;
 		n++;
@@ -507,13 +384,10 @@ __host__ __device__ int xOctaveInit(OctaveNoise *noise, Xoroshiro *xr, PerlinNoi
 }
 
 
-__host__ __device__ double sampleOctaveAmp(const OctaveNoise *noise, double x, double y, double z,
-		double yamp, double ymin, int ydefault)
-{
+__host__ __device__ double sampleOctaveAmp(const OctaveNoise *noise, double x, double y, double z, double yamp, double ymin, int ydefault) {
 	double v = 0;
 	int i;
-	for (i = 0; i < noise->octcnt; i++)
-	{
+	for (i = 0; i < noise->octcnt; i++) {
 		PerlinNoise *p = noise->octaves + i;
 		double lf = p->lacunarity;
 		double ax = x * lf;
@@ -525,12 +399,10 @@ __host__ __device__ double sampleOctaveAmp(const OctaveNoise *noise, double x, d
 	return v;
 }
 
-__host__ __device__ double sampleOctave(const OctaveNoise *noise, double x, double y, double z)
-{
+__host__ __device__ double sampleOctave(const OctaveNoise *noise, double x, double y, double z) {
 	double v = 0;
 	int i;
-	for (i = 0; i < noise->octcnt; i++)
-	{
+	for (i = 0; i < noise->octcnt; i++) {
 		PerlinNoise *p = noise->octaves + i;
 		double lf = p->lacunarity;
 		double ax = x * lf;
@@ -542,8 +414,7 @@ __host__ __device__ double sampleOctave(const OctaveNoise *noise, double x, doub
 	return v;
 }
 
-__host__ __device__ double sampleOctaveBeta17Biome(const OctaveNoise *noise, double x, double z)
-{
+__host__ __device__ double sampleOctaveBeta17Biome(const OctaveNoise *noise, double x, double z) {
 	double v = 0;
 	int i;
 	for (i = 0; i < noise->octcnt; i++)
@@ -576,15 +447,6 @@ __host__ __device__ void sampleOctaveBeta17Terrain(const OctaveNoise *noise, dou
 	}
 }
 
-
-__host__ __device__ void doublePerlinInit(DoublePerlinNoise *noise, uint64_t *seed,
-		PerlinNoise *octavesA, PerlinNoise *octavesB, int omin, int len)
-{   // require: len >= 1 && omin+len <= 0
-	noise->amplitude = (10.0 / 6.0) * len / (len + 1);
-	octaveInit(&noise->octA, seed, octavesA, omin, len);
-	octaveInit(&noise->octB, seed, octavesB, omin, len);
-}
-
 /**
  * Sets up a DoublePerlinNoise generator (MC 1.18+).
  * @noise:      Object to be initialized
@@ -596,17 +458,14 @@ __host__ __device__ void doublePerlinInit(DoublePerlinNoise *noise, uint64_t *se
  * @nmax:       Number of octaves available in buffer (can be <=0 to ignore)
  * @return Number of octaves used (see octaves buffer size).
  */
-__host__ __device__ int xDoublePerlinInit(DoublePerlinNoise *noise, Xoroshiro *xr,
-		PerlinNoise *octaves, const double *amplitudes, int omin, int len, int nmax)
-{
+__host__ __device__ int doublePerlinInit(DoublePerlinNoise *noise, Xoroshiro &random, PerlinNoise *octaves, const double *amplitudes, int omin, int len, int nmax) {
 	int i, n = 0, na = -1, nb = -1;
-	if (nmax > 0)
-	{
+	if (nmax > 0) {
 		na = (nmax + 1) >> 1;
 		nb = nmax - na;
 	}
-	n += xOctaveInit(&noise->octA, xr, octaves+n, amplitudes, omin, len, na);
-	n += xOctaveInit(&noise->octB, xr, octaves+n, amplitudes, omin, len, nb);
+	n += octaveInit(&noise->octA, random, octaves+n, amplitudes, omin, len, na);
+	n += octaveInit(&noise->octB, random, octaves+n, amplitudes, omin, len, nb);
 
 	// trim amplitudes of zero
 	for (i = len-1; i >= 0 && amplitudes[i] == 0.0; i--)
@@ -633,8 +492,8 @@ __host__ __device__ double sampleDoublePerlin(const DoublePerlinNoise *noise,
 }
 
 
-#ifdef __cplusplus
-}
-#endif
+// #ifdef __cplusplus
+// }
+// #endif
 
 #endif /* NOISE_H_ */
